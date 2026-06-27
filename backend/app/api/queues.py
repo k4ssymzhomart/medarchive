@@ -46,7 +46,15 @@ def _candidates_for(db: Session, item_id) -> list[MatchCandidateOut]:
     ]
 
 
-@router.get("/unmatched", response_model=UnmatchedListResponse)
+@router.get(
+    "/unmatched",
+    response_model=UnmatchedListResponse,
+    summary="Очередь оператора",
+    description=(
+        "Несопоставленные и пограничные позиции с топ-кандидатами справочника. "
+        "mode: all | unmatched | needs_review | anomaly."
+    ),
+)
 def list_unmatched(
     mode: str = Query("all", pattern="^(all|unmatched|needs_review|anomaly)$"),
     limit: int = Query(50, ge=1, le=500),
@@ -92,7 +100,16 @@ def list_unmatched(
     )
 
 
-@router.post("/match", response_model=MatchResponse)
+@router.post(
+    "/match",
+    response_model=MatchResponse,
+    summary="Ручное сопоставление позиции",
+    description="Подтвердить (confirm), отклонить (reject) или исправить (correct) сопоставление позиции.",
+    responses={
+        404: {"description": "Позиция или услуга не найдена"},
+        422: {"description": "Некорректное действие или отсутствует service_id"},
+    },
+)
 def match_endpoint(req: MatchRequest, db: Session = Depends(get_db)) -> MatchResponse:
     """Ручное сопоставление позиции (подтвердить/отклонить/исправить)."""
     try:

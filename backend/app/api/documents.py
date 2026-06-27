@@ -22,7 +22,16 @@ from app.services.upload_service import ingest_paths, ingest_zip
 router = APIRouter()
 
 
-@router.post("/upload", response_model=UploadResponse)
+@router.post(
+    "/upload",
+    response_model=UploadResponse,
+    summary="Загрузка прайса или ZIP архива",
+    description=(
+        "Принимает одиночный прайс (.pdf/.docx/.xlsx/.xls) или ZIP, регистрирует "
+        "документы и (при enqueue=true) ставит обработку в очередь Celery. "
+        "Дубликаты по хэшу файла пропускаются."
+    ),
+)
 async def upload(
     file: UploadFile = File(...),
     enqueue: bool = Query(True, description="Поставить в очередь Celery"),
@@ -50,7 +59,12 @@ async def upload(
     )
 
 
-@router.get("/documents", response_model=list[DocumentOut])
+@router.get(
+    "/documents",
+    response_model=list[DocumentOut],
+    summary="Список документов",
+    description="Загруженные документы по убыванию даты создания, с фильтром по статусу разбора.",
+)
 def list_documents(
     status: str | None = Query(None),
     db: Session = Depends(get_db),
@@ -62,7 +76,13 @@ def list_documents(
     return [DocumentOut.model_validate(d) for d in rows]
 
 
-@router.get("/documents/{doc_id}/status", response_model=DocumentStatusOut)
+@router.get(
+    "/documents/{doc_id}/status",
+    response_model=DocumentStatusOut,
+    summary="Статус обработки документа",
+    description="Статус разбора документа: число позиций, применялся ли OCR, время обработки, лог.",
+    responses={404: {"description": "Документ не найден"}},
+)
 def document_status(doc_id: uuid.UUID, db: Session = Depends(get_db)) -> DocumentStatusOut:
     doc = db.get(PriceDocument, doc_id)
     if doc is None:
