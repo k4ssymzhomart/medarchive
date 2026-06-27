@@ -18,7 +18,7 @@ export function FloatingDemo() {
 
   return (
     <motion.a
-      href="#demo"
+      href="#cta"
       initial={false}
       animate={
         reduce

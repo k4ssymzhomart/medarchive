@@ -30,8 +30,38 @@ export default {
         "surface-line": "#26262B",
         paper: "#FFFFFF",
         mist: "#F4F5F8",
-        muted: "#6B7280",
         line: "#E5E5E5",
+        // shadcn совместимые токены (для вставленных шаблонов). Маппятся на палитру v2.
+        // Фирменный accent оставлен плоским выше, поэтому shadcn accent сюда не добавляем.
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        // muted остаётся плоским вторичным текстом v2 (#6B7280, используется лендингом),
+        // а muted-foreground добавлен отдельно для вставленных shadcn шаблонов.
+        muted: "#6B7280",
+        "muted-foreground": "hsl(var(--muted-foreground))",
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
       },
       borderRadius: {
         // Сохраняем острые продуктовые радиусы и добавляем v2 скругления.

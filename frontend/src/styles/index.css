@@ -14,9 +14,29 @@
   --surface-line: #26262b;
   --paper: #ffffff;
   --mist: #f4f5f8;
-  --muted: #6b7280;
+  --muted-text: #6b7280;
   --line: #e5e5e5;
   --ease-out2: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* shadcn совместимые токены (HSL каналы) для вставленных шаблонов. Палитра v2. */
+  --background: 0 0% 100%;
+  --foreground: 240 6% 4%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 6% 4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 6% 4%;
+  --primary: 248 89% 67%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 225 25% 96%;
+  --secondary-foreground: 240 6% 4%;
+  --muted: 225 25% 96%;
+  --muted-foreground: 220 9% 46%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 248 89% 67%;
+  --radius: 0.75rem;
 }
 
 @layer base {

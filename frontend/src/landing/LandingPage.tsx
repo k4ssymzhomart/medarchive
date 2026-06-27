@@ -1,7 +1,9 @@
-// Публичный лендинг MedPartners. Композиция секций из ТЗ Фазы 0.1.
+// Публичный лендинг MedPartners. Композиция секций.
+// Hero заменён на floating-icons шаблон, ниже добавлена features сетка (шаблоны).
 
 import { Nav } from "./Nav";
-import { Hero } from "./Hero";
+import FloatingIconsHeroDemo from "../components/ui/floating-icons-hero-demo";
+import { Features } from "../components/blocks/features-8";
 import { LogoMarquee } from "./LogoMarquee";
 import { ValueStatement } from "./ValueStatement";
 import { FeatureSpotlight } from "./FeatureSpotlight";
@@ -16,7 +18,10 @@ export default function LandingPage() {
     <div className="min-h-screen bg-paper text-ink">
       <Nav />
       <main>
-        <Hero />
+        <div id="top">
+          <FloatingIconsHeroDemo />
+        </div>
+        <Features />
         <LogoMarquee />
         <ValueStatement />
         <FeatureSpotlight />
