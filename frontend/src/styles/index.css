@@ -1,13 +1,42 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Дизайн система v2 — токены как CSS переменные (источник правды, дублируют Tailwind). */
 :root {
-  --accent: #1F4BFF;
-  --ink: #0A0A0A;
-  --line: #E5E5E5;
+  --accent: #6d5ef6;
+  --accent-light: #9a8cff;
+  --accent-dark: #4b3fd6;
+  --ink: #0a0a0b;
+  --surface: #121214;
+  --surface-line: #26262b;
+  --paper: #ffffff;
+  --mist: #f4f5f8;
+  --muted-text: #6b7280;
+  --line: #e5e5e5;
+  --ease-out2: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* shadcn совместимые токены (HSL каналы) для вставленных шаблонов. Палитра v2. */
+  --background: 0 0% 100%;
+  --foreground: 240 6% 4%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 6% 4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 6% 4%;
+  --primary: 248 89% 67%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 225 25% 96%;
+  --secondary-foreground: 240 6% 4%;
+  --muted: 225 25% 96%;
+  --muted-foreground: 220 9% 46%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 248 89% 67%;
+  --radius: 0.75rem;
 }
 
 @layer base {
@@ -17,16 +46,19 @@
     height: 100%;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     margin: 0;
-    background-color: #ffffff;
+    background-color: var(--paper);
     color: var(--ink);
     font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
 
-  /* Острые углы по умолчанию: почти квадратные элементы. */
   * {
     border-color: var(--line);
   }
@@ -47,5 +79,56 @@
   .num {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
+  }
+
+  /* Моно надзаголовок (eyebrow). */
+  .eyebrow {
+    font-family: theme("fontFamily.mono");
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  /* Радиальное свечение акцента (hero, тёмные секции). */
+  .glow-radial {
+    background: radial-gradient(
+      closest-side,
+      rgba(154, 140, 255, 0.55),
+      rgba(154, 140, 255, 0.18) 45%,
+      rgba(154, 140, 255, 0) 72%
+    );
+  }
+
+  /* Диагональная акцентная панель для CTA. */
+  .gradient-cta {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  }
+
+  /* Мягкая фиолетовая дымка для градиентной секции. */
+  .gradient-haze {
+    background: linear-gradient(180deg, var(--paper) 0%, #eceaff 55%, var(--paper) 100%);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Бесконечная лента логотипов. */
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 38s linear infinite;
+}
+
+/* Уважаем настройку пониженного движения: глушим фон и ленту. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .marquee-track,
+  .animate-drift,
+  .animate-marquee {
+    animation: none !important;
   }
 }

@@ -317,7 +317,7 @@ function SectionHeader({
 
 function PartnerRow({ result }: { result: SearchResult }) {
   return (
-    <Link to={`/partners/${result.id}`} className="block">
+    <Link to={`/app/partners/${result.id}`} className="block">
       <Card className="flex items-center justify-between gap-4 p-4 transition-colors hover:border-accent/40 hover:bg-neutral-50">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-line bg-white text-neutral-500">
@@ -470,7 +470,7 @@ function ServicePartnersPanel({ serviceId }: { serviceId: string }) {
           <TR key={p.item_id} className="hover:bg-neutral-50">
             <TD>
               <Link
-                to={`/partners/${p.partner_id}`}
+                to={`/app/partners/${p.partner_id}`}
                 className="font-medium text-ink underline-offset-2 hover:text-accent hover:underline"
               >
                 {p.partner_name}

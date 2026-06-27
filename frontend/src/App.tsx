@@ -1,11 +1,12 @@
-// Маршрутизация MedPartners. Страницы создаются отдельными агентами в src/pages.
-// Используем ленивые импорты, чтобы маршруты подключались по требованию.
+// Маршрутизация MedPartners v2.
+// `/` — публичный лендинг. `/app/*` — продукт (существующие экраны под Layout).
 
 import { Suspense, lazy } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Spinner, EmptyState } from "./components/ui";
 
+const LandingPage = lazy(() => import("./landing/LandingPage"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const PartnersPage = lazy(() => import("./pages/PartnersPage"));
 const PartnerDetailPage = lazy(() => import("./pages/PartnerDetailPage"));
@@ -31,21 +32,33 @@ function NotFound() {
   );
 }
 
-export default function App() {
+// Продукт: существующие экраны под общим Layout, маршруты относительно /app.
+function ProductShell() {
   return (
     <Layout>
       <Suspense fallback={<PageFallback />}>
         <Routes>
-          <Route path="/" element={<SearchPage />} />
-          <Route path="/partners" element={<PartnersPage />} />
-          <Route path="/partners/:id" element={<PartnerDetailPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          <Route path="/verification" element={<VerificationPage />} />
-          <Route path="/unmatched" element={<UnmatchedPage />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route index element={<SearchPage />} />
+          <Route path="partners" element={<PartnersPage />} />
+          <Route path="partners/:id" element={<PartnerDetailPage />} />
+          <Route path="admin" element={<AdminPage />} />
+          <Route path="verification" element={<VerificationPage />} />
+          <Route path="unmatched" element={<UnmatchedPage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/app/*" element={<ProductShell />} />
+      </Routes>
+    </Suspense>
   );
 }
