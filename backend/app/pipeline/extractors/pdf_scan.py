@@ -22,6 +22,8 @@ from app.pipeline.columns import (
     analyze_table,
     assign_to_columns,
     group_rows,
+    stitch_multiline,
+    strip_leading_enumeration,
 )
 from app.pipeline.ocr import ocr_page_text, ocr_page_words, postprocess_ocr_text
 from app.pipeline.price_parser import parse_amount
@@ -165,6 +167,9 @@ class PdfScanExtractor(Extractor):
         if not bounds:
             return []
         data_rows = rows[header_idx + 1 :] if header_idx >= 0 else rows
+        # Склейка многострочных названий (issue #1): та же логика, что у
+        # текстового PDF — дозаполняет пустую колонку имени со строк без цены.
+        data_rows = stitch_multiline(data_rows, bounds, cmap)
 
         items: list[ExtractedItem] = []
         category: str | None = None
@@ -244,7 +249,8 @@ class PdfScanExtractor(Extractor):
         if cmap is not None and cmap.name_idx is not None and cmap.name_idx < len(cells):
             candidate = cells[cmap.name_idx].strip()
             if candidate:
-                return candidate
+                # Колонка «№» слилась с названием — срезаем ведущий номер строки.
+                return strip_leading_enumeration(candidate) if cmap.name_has_index else candidate
 
         # Фолбэк: самая длинная ячейка без распознанной цены.
         best = ""
