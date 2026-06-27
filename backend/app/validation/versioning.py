@@ -17,11 +17,18 @@ from app.models import PriceItem
 
 
 def _price_of(item: PriceItem) -> Decimal | None:
-    return item.price_resident_kzt or item.price_nonresident_kzt or item.price_original
+    """Цена для сравнения версий: первое заполненное поле, а не первое
+    истинное (Decimal('0') ложен, поэтому ``or`` пропустил бы валидный ноль)."""
+    for price in (item.price_resident_kzt, item.price_nonresident_kzt, item.price_original):
+        if price is not None:
+            return price
+    return None
 
 
 def pct_change(old: Decimal | None, new: Decimal | None) -> float | None:
     if old is None or new is None or old == 0:
+        return None
+    if not (old.is_finite() and new.is_finite()):
         return None
     return float(abs(new - old) / old)
 
