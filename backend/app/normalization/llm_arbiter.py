@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 
 import httpx
 from sqlalchemy import select
@@ -17,6 +18,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import AICache
+
+log = logging.getLogger(__name__)
+
+# Любой сбой сети/ответа AI = позиция уходит в needs_review (issue #19).
+_AI_ERRORS = (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError)
 
 _SYSTEM = (
     "Ты медицинский эксперт по нормализации названий услуг. Тебе дают исходное "
@@ -49,23 +55,27 @@ def arbitrate(db: Session, query: str, category: str | None, candidates: list[st
         f"Категория: {category or 'неизвестно'}\n"
         f"Кандидаты:\n{numbered}\n\nОтвет JSON:"
     )
-    resp = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": settings.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": settings.llm_model,
-            "max_tokens": 300,
-            "system": _SYSTEM,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-        timeout=45.0,
-    )
-    resp.raise_for_status()
-    text = resp.json()["content"][0]["text"]
+    try:
+        resp = httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": settings.anthropic_api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": settings.llm_model,
+                "max_tokens": 300,
+                "system": _SYSTEM,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=45.0,
+        )
+        resp.raise_for_status()
+        text = resp.json()["content"][0]["text"]
+    except _AI_ERRORS as exc:
+        log.warning("LLM арбитр недоступен, позиция в ревью: %s", exc)
+        return None
     try:
         start, end = text.index("{"), text.rindex("}") + 1
         payload = json.loads(text[start:end])

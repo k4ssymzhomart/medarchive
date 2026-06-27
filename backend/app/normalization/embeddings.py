@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 
 import httpx
 from sqlalchemy import select
@@ -15,6 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import AICache
+
+log = logging.getLogger(__name__)
+
+# Любой сбой сети/ответа AI = деградация на лексику, документ не падает (issue #19).
+_AI_ERRORS = (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError)
 
 
 def _key(text: str) -> str:
@@ -45,7 +51,11 @@ def embed_text(db: Session, text: str) -> list[float] | None:
         return cached
     if not settings.openai_api_key:
         return None
-    vector = _call_openai([text])[0]
+    try:
+        vector = _call_openai([text])[0]
+    except _AI_ERRORS as exc:
+        log.warning("Эмбеддинги недоступны, фолбэк на лексику: %s", exc)
+        return None
     _cache_put(db, key, vector)
     return vector
 
@@ -65,7 +75,11 @@ def embed_batch(db: Session, texts: list[str]) -> list[list[float] | None]:
             to_fetch.append((i, t))
 
     if to_fetch and settings.openai_api_key:
-        vectors = _call_openai([t for _, t in to_fetch])
+        try:
+            vectors = _call_openai([t for _, t in to_fetch])
+        except _AI_ERRORS as exc:
+            log.warning("Пакетные эмбеддинги недоступны, фолбэк на лексику: %s", exc)
+            return results
         for (i, t), vec in zip(to_fetch, vectors):
             results[i] = vec
             _cache_put(db, _key(t), vec)
