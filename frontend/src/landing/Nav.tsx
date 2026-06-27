@@ -7,7 +7,7 @@ import { BrandMark } from "./BrandMark";
 const LINKS = [
   { label: "Возможности", href: "#features" },
   { label: "Как это работает", href: "#pipeline" },
-  { label: "Цены", href: "#cta" },
+  { label: "Результаты", href: "#metrics" },
   { label: "Компания", href: "#footer" },
 ];
 
