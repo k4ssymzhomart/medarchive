@@ -68,3 +68,20 @@ def normalize_name(text: str) -> str:
 
 def tokens(text: str) -> set[str]:
     return set(normalize(text).split())
+
+
+# Кириллические гомоглифы латинских букв. Коды тарификатора в справочнике
+# латиницей (A02.004.000), а в русских прайсах и OCR префикс часто кириллический
+# (В02.110.002 у Клиники 3, где «В» это кириллица). Приводим к латинице.
+_HOMO = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O",
+    "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X",
+})
+
+
+def normalize_code(s: str | None) -> str | None:
+    """Каноническая форма кода тарификатора для сравнения справочника и прайса."""
+    if not s:
+        return None
+    s = str(s).strip().upper().replace(" ", "")
+    return s.translate(_HOMO) or None

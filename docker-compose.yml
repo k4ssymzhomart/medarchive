@@ -39,11 +39,14 @@ services:
         condition: service_healthy
     volumes:
       - storage_data:/data/storage
+      # Реальный справочник и архив доступны внутри контейнера для seed/ingest.
+      - "./docs:/app/docs:ro"
+      - "./Справочник услуг.xlsx:/app/Справочник услуг.xlsx:ro"
     ports:
       - "8000:8000"
     command: >
       sh -c "alembic upgrade head &&
-             python -m app.cli seed-reference &&
+             python -m app.cli seed-reference 'Справочник услуг.xlsx' &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   worker:

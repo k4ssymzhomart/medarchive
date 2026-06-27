@@ -60,6 +60,7 @@ class Currency(str, enum.Enum):
 
 
 class MatchMethod(str, enum.Enum):
+    code = "code"  # Level 0: детерминированный матч по коду тарификатора
     exact = "exact"
     synonym = "synonym"
     fuzzy = "fuzzy"
