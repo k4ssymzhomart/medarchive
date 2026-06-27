@@ -43,7 +43,7 @@ export function Proof() {
               style={{ fontSize: "clamp(5rem, 16vw, 12rem)" }}
               className="num -ml-1 font-semibold leading-[0.9] tracking-tight text-ink"
             >
-              <Counter to={1281} />
+              <Counter to={1231} />
             </div>
           </Reveal>
           <Reveal intent="sub" className="col-span-12 md:col-span-4 md:col-start-9">

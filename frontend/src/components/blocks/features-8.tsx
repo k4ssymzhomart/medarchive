@@ -1,5 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card'
-import { Shield, Users } from 'lucide-react'
+import { Shield, UserRound, Users } from 'lucide-react'
 
 export function Features() {
     return (
@@ -155,21 +155,21 @@ export function Features() {
                                 <div className="before:bg-(--color-border) relative mt-6 before:absolute before:inset-0 before:mx-auto before:w-px sm:-my-6 sm:-mr-6">
                                     <div className="relative flex h-full flex-col justify-center space-y-6 py-6">
                                         <div className="relative flex w-[calc(50%+0.875rem)] items-center justify-end gap-2">
-                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">Likeur</span>
-                                            <div className="ring-background size-7 ring-4">
-                                                <img className="size-full rounded-full" src="https://avatars.githubusercontent.com/u/102558960?v=4" alt="" />
+                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">ОАК</span>
+                                            <div className="ring-background flex size-7 items-center justify-center rounded-full border bg-muted ring-4">
+                                                <UserRound className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden />
                                             </div>
                                         </div>
                                         <div className="relative ml-[calc(50%-1rem)] flex items-center gap-2">
-                                            <div className="ring-background size-8 ring-4">
-                                                <img className="size-full rounded-full" src="https://avatars.githubusercontent.com/u/47919550?v=4" alt="" />
+                                            <div className="ring-background flex size-8 items-center justify-center rounded-full border bg-muted ring-4">
+                                                <UserRound className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden />
                                             </div>
-                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">M. Irung</span>
+                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">МРТ</span>
                                         </div>
                                         <div className="relative flex w-[calc(50%+0.875rem)] items-center justify-end gap-2">
-                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">B. Ng</span>
-                                            <div className="ring-background size-7 ring-4">
-                                                <img className="size-full rounded-full" src="https://avatars.githubusercontent.com/u/31113941?v=4" alt="" />
+                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">ЭКГ</span>
+                                            <div className="ring-background flex size-7 items-center justify-center rounded-full border bg-muted ring-4">
+                                                <UserRound className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden />
                                             </div>
                                         </div>
                                     </div>
