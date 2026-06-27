@@ -12,10 +12,12 @@ from app.pipeline.columns import (
     ColumnMap,
     Row,
     Word,
+    _is_absorb_boundary,
     _is_bare_index,
     _is_index_sequence,
     _is_section_heading,
     _looks_like_price,
+    _name_column_has_indices,
     _name_incomplete,
     analyze_table,
     assign_to_columns,
@@ -181,18 +183,79 @@ def test_stitch_assembles_multiline_name_in_order():
     )
 
 
-def test_stitch_partial_name_anchor_absorbs_continuation():
-    # T4: у ценовой строки имя уже есть, но оборвано (скобка не закрыта) —
-    # продолжение со строки ниже должно дотянуться.
+def test_stitch_leaves_partial_name_anchor_untouched():
+    # Консервативно: ценовую строку с уже заполненным (пусть и оборванным) именем
+    # не трогаем — это исключает над-поглощение чужих услуг и преамбулы.
     bounds, cmap = _k3_bounds_cmap()
     anchor = _row(_w("Na (натрий) (Определение натрия (Na) в", 115, 40), _w("700", 470, 40))
     cont = _row(_w("сыворотке крови на анализаторе)", 115, 52))
     next_anchor = _row(_w("Общий белок", 115, 64), _w("900", 470, 64))
     stitched = stitch_multiline([anchor, cont, next_anchor], bounds, cmap)
-    assert len(stitched) == 2
+    assert len(stitched) == 3
     assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == (
-        "Na (натрий) (Определение натрия (Na) в сыворотке крови на анализаторе)"
+        "Na (натрий) (Определение натрия (Na) в"
     )
+
+
+def test_stitch_stops_at_big_vertical_gap():
+    # Преамбула/чужая строка выше отделена крупным зазором -> вверх не тянем.
+    bounds, cmap = _k3_bounds_cmap()
+    far = _row(_w("Прейскурант на медицинские услуги", 115, 10))  # большой зазор ниже
+    name_above = _row(_w("Гистологическое исследование", 115, 60))
+    anchor = _row(_w("", 320, 66), _w("В08.1", 320, 66), _w("9330", 470, 66))
+    below = _row(_w("биопсийного материала", 115, 72))
+    stitched = stitch_multiline([far, name_above, anchor, below], bounds, cmap)
+    merged = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched if r.cells]
+    assert merged == ["Гистологическое исследование биопсийного материала"]
+    # Преамбула осталась отдельной строкой, в имя не попала.
+    assert any(assign_to_columns(r, bounds)[cmap.name_idx] == "Прейскурант на медицинские услуги"
+               for r in stitched if r.cells is None)
+
+
+def test_stitch_stops_at_contract_preamble():
+    # Боилерплейт договора над пустым anchor не должен попасть в название.
+    bounds, cmap = _k3_bounds_cmap()
+    pre1 = _row(_w("Приложение № 1 от 01.01.2026", 115, 40))
+    pre2 = _row(_w("к договору на оказание услуг", 115, 47))
+    name_above = _row(_w("Гистологическое исследование", 115, 54))
+    anchor = _row(_w("В08.1", 320, 60), _w("9330", 470, 60))
+    stitched = stitch_multiline([pre1, pre2, name_above, anchor], bounds, cmap)
+    merged = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched if r.cells]
+    assert merged == ["Гистологическое исследование"]
+    assert _is_absorb_boundary(["Приложение № 1 от 01.01.2026"], cmap) is True
+    assert _is_absorb_boundary(["к договору на оказание услуг"], cmap) is True
+
+
+def test_stitch_stops_at_second_code_distinct_services():
+    # Две услуги, у каждой свой код, не должны слиться в одно имя.
+    bounds, cmap = _k3_bounds_cmap()
+    anchor = _row(_w("кровь с ЭДТА", 390, 40), _w("880", 470, 40))
+    s1 = _row(_w("Т4 свободный", 115, 47), _w("В06.203", 320, 47))
+    s2 = _row(_w("Анти-ТГ антитела", 115, 54), _w("В06.202", 320, 54))
+    nxt = _row(_w("кровь с ЭДТА", 390, 61), _w("1500", 470, 61))
+    stitched = stitch_multiline([anchor, s1, s2, nxt], bounds, cmap)
+    merged = assign_to_columns(stitched[0], bounds)
+    assert merged[cmap.name_idx] == "Т4 свободный"
+    assert merged[cmap.code_idx] == "В06.203"
+    # Вторая услуга осталась отдельной строкой, в имя первой не влилась.
+    names = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched]
+    assert "Анти-ТГ антитела" in names
+
+
+def test_name_column_has_indices_content_based():
+    # Колонка названия с ведущими номерами распознаётся по содержимому (битый «№»).
+    bounds = [40.0, 300.0]
+    rows = [
+        _row(_w("9 Выездная консультация врача", 45, 10), _w("148500", 305, 10)),
+        _row(_w("10 Снятие швов", 45, 30), _w("18700", 305, 30)),
+        _row(_w("11 Перевязка раны", 45, 50), _w("5000", 305, 50)),
+        _row(_w("12 Гипсовая повязка", 45, 70), _w("7000", 305, 70)),
+        _row(_w("13 Снятие гипса", 45, 90), _w("3000", 305, 90)),
+    ]
+    assert _name_column_has_indices(rows, bounds, 0) is True
+    # Обычная колонка названий — без ведущих номеров.
+    plain = [_row(_w("Консультация терапевта", 45, 10), _w("9000", 305, 10)) for _ in range(5)]
+    assert _name_column_has_indices(plain, bounds, 0) is False
 
 
 def test_stitch_bare_number_anchor_absorbs_above_and_below():
@@ -297,3 +360,26 @@ def test_extractor_read_name_keeps_number_without_index_flag():
     cmap = ColumnMap(name_idx=0, code_idx=None, price_idxs=[1], name_has_index=False)
     cells = ["3D реконструкция", "5000"]
     assert PdfTextExtractor._read_name(cells, cmap) == "3D реконструкция"
+
+
+def test_scan_extractor_strips_row_number():
+    # T3: та же логика среза номера в скан-экстракторе.
+    from app.pipeline.extractors.pdf_scan import PdfScanExtractor
+
+    cmap = ColumnMap(name_idx=0, code_idx=None, price_idxs=[1], name_has_index=True)
+    cells = ["6 Перевязка раны", "5000"]
+    assert PdfScanExtractor._extract_name(cells, cmap, "6 Перевязка раны 5000") == "Перевязка раны"
+
+
+def test_stitch_preserves_both_prices_when_assembling_name():
+    # T1: у реальных K3/K4 два-три тарифа — обе цены остаются при склейке имени.
+    bounds = [80.0, 110.0, 315.0, 385.0, 465.0, 519.0]
+    cmap = ColumnMap(name_idx=1, code_idx=2, price_idxs=[4, 5])
+    anchor = _row(_w("кровь с ЭДТА", 390, 43), _w("880", 470, 43), _w("1410", 522, 43))
+    name_row = _row(_w("Общий анализ крови (ОАК без СОЭ)", 115, 50))
+    nxt = _row(_w("кровь с ЭДТА", 390, 57), _w("3980", 470, 57), _w("2985", 522, 57))
+    stitched = stitch_multiline([anchor, name_row, nxt], bounds, cmap)
+    cells = assign_to_columns(stitched[0], bounds)
+    assert cells[cmap.name_idx] == "Общий анализ крови (ОАК без СОЭ)"
+    assert cells[4] == "880"
+    assert cells[5] == "1410"

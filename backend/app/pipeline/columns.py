@@ -147,13 +147,21 @@ _CURRENCY_WORD = re.compile(r"тенге|тг|kzt|руб|rub|usd|₸|\$", re.IGN
 
 
 def _looks_like_price(text: str) -> bool:
-    """Ячейка это цена: парсится в число, а из букв остаётся только валюта или
-    короткий предлог («5000 тенге», «от 5000»). «9 Выездная консультация врача»
-    ценой НЕ считается — иначе колонка названий с ведущим номером уезжает в цены."""
+    """Ячейка это цена. Чистое число с валютным хвостом — цена («5000 тенге»).
+    Число с описанием тоже цена, если КРУПНОЕ число идёт первым («5000 тг аппарат
+    Тонзилор»). «9 Выездная консультация врача» ценой НЕ считается: ведущий «9» это
+    номер строки, иначе колонка названий уезжает в цены."""
     if _parse_amount(text) is None:
         return False
     core = _CURRENCY_WORD.sub("", text)
-    return sum(ch.isalpha() for ch in core) <= 2
+    if sum(ch.isalpha() for ch in core) <= 2:
+        return True
+    lead = re.match(r"\s*(\d[\d\s.,]*)", text)
+    if lead:
+        amount = _parse_amount(lead.group(1))
+        if amount is not None and amount >= 100:
+            return True
+    return False
 
 
 def _looks_like_code(text: str) -> bool:
@@ -344,6 +352,10 @@ def analyze_table(rows: list[Row]) -> tuple[list[float], ColumnMap, int]:
         if name_idx is not None and code_idx == name_idx:
             name_has_index = True
             code_idx = None
+        # Заголовок «№» может быть битым OCR (Клиника 4, стр. 9/15): определяем
+        # ведущий номер по содержимому колонки названия, а не только по подписи.
+        if not name_has_index and _name_column_has_indices(data_rows, bounds, name_idx):
+            name_has_index = True
         cmap = ColumnMap(
             name_idx=name_idx,
             code_idx=code_idx,
@@ -353,6 +365,8 @@ def analyze_table(rows: list[Row]) -> tuple[list[float], ColumnMap, int]:
         )
     else:
         cmap = content
+        if _name_column_has_indices(data_rows, bounds, cmap.name_idx):
+            cmap.name_has_index = True
     return bounds, cmap, header_idx
 
 
@@ -399,8 +413,11 @@ def _is_bare_index(text: str) -> bool:
     return re.fullmatch(r"\d{1,3}[.)]?", text.strip()) is not None
 
 
-# Ключевые слова, с которых начинается строка раздела/подраздела.
-_SECTION_KEYWORDS = ("раздел", "подраздел", "глава", "категория", "прейскурант")
+# Ключевые слова и шаблоны строк-разделов и преамбулы документа (не услуги).
+_SECTION_KEYWORDS = (
+    "раздел", "подраздел", "глава", "категория", "прейскурант", "приложение",
+)
+_CONTRACT_DATE_RE = re.compile(r"\d{2}[.,]\d{2}[.,]\d{4}")
 
 
 def _is_section_heading(cells: list[str]) -> bool:
@@ -428,35 +445,60 @@ def _is_section_heading(cells: list[str]) -> bool:
 
 
 def _is_absorb_boundary(cells: list[str], cmap: ColumnMap) -> bool:
-    """Граница склейки: заголовок раздела (капс) или строка по ключевому слову
-    («подраздел 1.2 ...»). Дальше этой строки название не тянем."""
+    """Граница склейки: заголовок раздела (капс), строка-раздел по ключевому слову
+    («подраздел 1.2 ...») или преамбула договора («Приложение № 1 ... к договору
+    ... от 01.01.2026»). Дальше этой строки название не тянем."""
     if _is_section_heading(cells):
         return True
-    if cmap.name_idx is not None and cmap.name_idx < len(cells):
-        return cells[cmap.name_idx].strip().lower().startswith(_SECTION_KEYWORDS)
-    return False
+    text = " ".join(c for c in cells if c.strip()).strip()
+    low = text.lower()
+    if low.startswith(_SECTION_KEYWORDS) or "договор" in low:
+        return True
+    return bool(_CONTRACT_DATE_RE.search(text))
+
+
+def _name_column_has_indices(
+    rows: list[Row], bounds: list[float], name_idx: int | None, sample: int = 150
+) -> bool:
+    """Колонка названия начинается со сквозного номера строки («9 Выездная ...»,
+    «6»). Определяем по содержимому, чтобы покрыть страницы с битым OCR заголовка
+    «№» (Клиника 4, стр. 9/15), где подпись колонки не распозналась."""
+    if name_idx is None:
+        return False
+    indexed = total = 0
+    for r in rows[:sample]:
+        cells = assign_to_columns(r, bounds)
+        if name_idx >= len(cells):
+            continue
+        text = cells[name_idx].strip()
+        if not text:
+            continue
+        total += 1
+        if _is_bare_index(text) or _LEADING_INDEX_RE.match(text):
+            indexed += 1
+    return total >= 5 and indexed / total > 0.5
+
+
+def _anchor_needs_name(name: str, cmap: ColumnMap) -> bool:
+    """Ценовой строке нужно дотянуть название: оно пустое или это голый номер
+    строки (Клиника 4). Частично заполненные имена не трогаем — их склейка давала
+    над-поглощение (захват чужих услуг и преамбулы)."""
+    n = name.strip()
+    if not n:
+        return True
+    return cmap.name_has_index and _is_bare_index(n)
 
 
 def _name_incomplete(name: str) -> bool:
-    """Название оборвано и продолжается ниже: пусто, кончается знаком переноса
-    или скобка не закрыта («... (Определение натрия (Na) в»)."""
+    """Название оборвано и продолжается ниже: пусто, кончается знаком переноса или
+    скобка не закрыта («Антитела ... (АМА-М2, М2-ЗЕ,»). Используется, чтобы
+    отличить продолжение капсом (список антител) от начала следующей услуги."""
     n = name.strip()
     if not n:
         return True
     if n[-1] in "(,/":
         return True
     return n.count("(") > n.count(")")
-
-
-def _anchor_needs_name(name: str, cmap: ColumnMap) -> bool:
-    """Ценовой строке нужно дотянуть название: оно пустое, это голый номер строки
-    (Клиника 4) или оборванный фрагмент."""
-    n = name.strip()
-    if not n:
-        return True
-    if cmap.name_has_index and _is_bare_index(n):
-        return True
-    return _name_incomplete(n)
 
 
 def _assembled_name(
@@ -473,6 +515,16 @@ def _assembled_name(
             continue
         parts.append(text)
     return " ".join(parts)
+
+
+def _line_gap_limit(rows: list[Row]) -> float:
+    """Порог вертикального зазора «своя строка vs новая запись». Берём 2.2 высоты
+    строки: внутри одной позиции строки идут вплотную (~1 высота), между записями
+    и до преамбулы зазор заметно больше."""
+    heights = sorted(w.bottom - w.top for r in rows for w in r.words if w.bottom > w.top)
+    if not heights:
+        return 16.0
+    return max(heights[len(heights) // 2] * 2.2, 12.0)
 
 
 def _merge_member_cells(
@@ -502,6 +554,11 @@ def _merge_member_cells(
     return out
 
 
+# Сколько строк максимум тянем ВВЕРХ (имя над ценой): реальная обёртка это 1-2
+# строки, дальше идёт шапка/преамбула.
+_UPWARD_MAX_STEPS = 3
+
+
 def stitch_multiline(
     data_rows: list[Row], bounds: list[float], cmap: ColumnMap, max_absorb: int = 10
 ) -> list[Row]:
@@ -514,13 +571,15 @@ def stitch_multiline(
     - Клиника 4: название обёрнуто ВОКРУГ ценовой строки (часть выше, часть ниже),
       а в самой ценовой строке стоит только номер «6».
 
-    Ценовая строка (anchor), которой нужно дотянуть название, поглощает соседние
-    строки без цены: вниз — продолжения имени/кода, вверх — если своё имя пустое
-    или это голый номер. Останавливаемся на следующей ценовой строке и на границе
-    раздела. Текст каждой колонки склеивается отдельно в порядке чтения, поэтому
-    биоматериал и цена не попадают в имя. Ценовые строки с готовым названием не
-    трогаем (Клиника 4 «Выездная консультация врача» и штатные прайсы — без
-    регрессий)."""
+    Ценовая строка (anchor) с пустым/номерным именем поглощает соседние строки без
+    цены — вниз продолжения имени/кода, вверх (жёстко ограниченно) имя над ценой.
+    Склейка КОНСЕРВАТИВНА, чтобы не слить разные услуги и не утянуть преамбулу:
+    останавливаемся на следующей ценовой строке, заголовке раздела, преамбуле, при
+    большом вертикальном зазоре, на втором коде (вторая услуга) и на заглавной
+    букве уже после набранного имени (начало следующей услуги). Каждая колонка
+    склеивается отдельно в порядке чтения — биоматериал и цена в имя не попадают.
+    Строки с готовым названием не трогаем (Клиника 4 «Выездная консультация врача»
+    и штатные прайсы — без регрессий)."""
     if cmap.name_idx is None or not cmap.price_idxs:
         return data_rows
 
@@ -528,44 +587,65 @@ def stitch_multiline(
     cells_list = [assign_to_columns(r, bounds) for r in data_rows]
     priced = [_row_is_priced(c, cmap) for c in cells_list]
     boundary = [_is_absorb_boundary(c, cmap) for c in cells_list]
+    gap_limit = _line_gap_limit(data_rows)
     claimed = [False] * n
     members_of: dict[int, list[int]] = {}
+
+    def name_at(k: int) -> str:
+        cells = cells_list[k]
+        return cells[cmap.name_idx].strip() if cmap.name_idx < len(cells) else ""
+
+    def code_at(k: int) -> str:
+        if cmap.code_idx is None or cmap.code_idx >= len(cells_list[k]):
+            return ""
+        return cells_list[k][cmap.code_idx].strip()
 
     for i in range(n):
         if not priced[i]:
             continue
-        name = cells_list[i][cmap.name_idx].strip() if cmap.name_idx < len(cells_list[i]) else ""
-        if not _anchor_needs_name(name, cmap):
+        if not _anchor_needs_name(name_at(i), cmap):
             continue
         members = [i]
-        absorbed = 0
-        # Вверх тянем только когда своего имени по сути нет (Клиника 4: имя над ценой).
-        if not name or (cmap.name_has_index and _is_bare_index(name)):
-            j = i - 1
-            while (
-                j >= 0 and absorbed < max_absorb
-                and not claimed[j] and not priced[j] and not boundary[j]
-            ):
-                members.insert(0, j)
-                claimed[j] = True
-                absorbed += 1
-                j -= 1
-        # Вниз тянем продолжения имени/кода до следующей цены или раздела.
+        name = name_at(i)
+        have_name = bool(name) and not (cmap.name_has_index and _is_bare_index(name))
+        have_code = bool(code_at(i))
+        # Вверх: имя над ценой (Клиника 4 wrap, гистология Клиники 1). Жёстко
+        # ограничиваем шагами и зазором, чтобы не утянуть шапку/преамбулу.
+        steps, j = 0, i - 1
+        while (
+            j >= 0 and steps < _UPWARD_MAX_STEPS and len(members) <= max_absorb
+            and not claimed[j] and not priced[j] and not boundary[j]
+            and data_rows[j + 1].top - data_rows[j].top <= gap_limit
+        ):
+            if have_code and code_at(j):
+                break  # своя пара «код» выше — это отдельная услуга
+            members.insert(0, j)
+            claimed[j] = True
+            have_name = have_name or bool(name_at(j))
+            have_code = have_code or bool(code_at(j))
+            steps += 1
+            j -= 1
+        # Вниз: продолжения имени/кода до конца записи.
         j = i + 1
         while (
-            j < n and absorbed < max_absorb
+            j < n and len(members) <= max_absorb
             and not claimed[j] and not priced[j] and not boundary[j]
+            and data_rows[j].top - data_rows[j - 1].top <= gap_limit
         ):
-            cand = cells_list[j][cmap.name_idx].strip() if cmap.name_idx < len(cells_list[j]) else ""
-            # Заглавная буква при уже целом названии — это начало следующей
-            # позиции (имя над своей ценой), не продолжение. Дальше не тянем.
-            if cand[:1].isupper():
+            cand_name, cand_code = name_at(j), code_at(j)
+            if have_code and cand_code:
+                break  # второй код — следующая услуга
+            # Заглавная буква при УЖЕ ЦЕЛОМ имени — начало следующей услуги.
+            # Если имя ещё оборвано (незакрытая скобка), капсовый фрагмент это его
+            # продолжение (список антител «PML, gp21,0, ...»), тянем дальше.
+            if have_name and cand_name[:1].isupper():
                 sofar = _assembled_name(members, cells_list, cmap, i)
                 if sofar and not _name_incomplete(sofar):
                     break
             members.append(j)
             claimed[j] = True
-            absorbed += 1
+            have_name = have_name or bool(cand_name)
+            have_code = have_code or bool(cand_code)
             j += 1
         if len(members) > 1:
             members_of[i] = members
