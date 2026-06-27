@@ -51,8 +51,13 @@ class Word:
 class Row:
     words: list[Word] = field(default_factory=list)
     top: float = 0.0
+    # Готовые ячейки склеенной строки (stitch_multiline). Если заданы — берём их,
+    # не пересобирая из words по X (слова разных уровней Y перемешались бы).
+    cells: list[str] | None = None
 
     def text(self) -> str:
+        if self.cells is not None:
+            return " ".join(c for c in self.cells if c).strip()
         return " ".join(w.text for w in sorted(self.words, key=lambda w: w.x0)).strip()
 
 
@@ -97,14 +102,13 @@ def cluster_columns(words: list[Word], min_gap: float = 18.0) -> list[float]:
 def assign_to_columns(row: Row, bounds: list[float]) -> list[str]:
     """Раскладывает слова строки по колонкам, заданным границами bounds.
 
-    Слова упорядочены по (Y, X): для обычной строки все слова на одной высоте,
-    поэтому это эквивалентно сортировке по X. Но после склейки многострочного
-    названия (stitch_multiline) строка содержит слова с нескольких уровней Y —
-    сортировка по (Y, X) сохраняет порядок чтения сверху вниз, слева направо,
-    иначе слова разных строк перемешались бы по X внутри колонки.
+    Для склеенной строки (stitch_multiline) ячейки уже собраны в порядке чтения
+    сверху вниз и лежат в row.cells — берём их. Обычную строку раскладываем по X.
     """
+    if row.cells is not None:
+        return list(row.cells)
     cells = ["" for _ in bounds]
-    for w in sorted(row.words, key=lambda w: (round(w.top), w.x0)):
+    for w in sorted(row.words, key=lambda w: w.x0):
         idx = 0
         for i, b in enumerate(bounds):
             if w.xmid >= b:
@@ -185,10 +189,10 @@ def _is_index_sequence(values: list) -> bool:
         ints.append(int(f))
     if len(ints) < 3:
         return False
+    # Шаг нумерации: инкремент на 1 либо сброс к малому значению (новый раздел).
+    # Постоянную колонку (одинаковые цены) индексом НЕ считаем — нет прогресса.
     enum_steps = sum(
-        1
-        for a, b in zip(ints, ints[1:])
-        if b == a + 1 or b == a or (b <= a and b <= 3)
+        1 for a, b in zip(ints, ints[1:]) if b == a + 1 or (1 <= b <= 3 and b <= a)
     )
     return enum_steps / (len(ints) - 1) > 0.7
 
@@ -390,67 +394,193 @@ def _row_is_priced(cells: list[str], cmap: ColumnMap) -> bool:
     return False
 
 
+def _is_bare_index(text: str) -> bool:
+    """Ячейка это только номер строки: «6», «10.», «3)» — не название."""
+    return re.fullmatch(r"\d{1,3}[.)]?", text.strip()) is not None
+
+
+# Ключевые слова, с которых начинается строка раздела/подраздела.
+_SECTION_KEYWORDS = ("раздел", "подраздел", "глава", "категория", "прейскурант")
+
+
 def _is_section_heading(cells: list[str]) -> bool:
-    """Заголовок раздела внутри окна склейки: длинный текст, почти весь капсом
-    («ИММУНОГЕМАТОЛОГИЧЕСКИЕ ИССЛЕДОВАНИЯ»). Такой заголовок не часть названия —
-    на нём склейку останавливаем. Продолжения и сноски (начинаются со скобки,
-    дефиса или строчной буквы) заголовком НЕ считаем."""
+    """Заголовок раздела внутри окна склейки: текст почти весь капсом и без цифр
+    («ЦИТОЛОГИЯ», «ИММУНОГЕМАТОЛОГИЧЕСКИЕ ИССЛЕДОВАНИЯ»). На нём склейку
+    останавливаем. Продолжение названия НЕ заголовок: оно начинается со скобки,
+    строчной буквы или знака, заканчивается знаком переноса, либо содержит цифры
+    (списки антител «PML, gp21,0, LK.M-1, ...»)."""
     text = " ".join(c for c in cells if c.strip()).strip()
-    if len(text) < 12 or text[0] in "(<[-—.,:;":
+    if not text or text[0] in "(<[-—.,:;":
+        return False
+    if text[-1] in ",(/-":
+        return False
+    if any(ch.isdigit() for ch in text):
         return False
     letters = [c for c in text if c.isalpha()]
     if len(letters) < 5:
         return False
-    upper = sum(1 for c in letters if c.isupper())
-    return upper / len(letters) > 0.7
+    upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
+    # Одно-двухсловный капсовый заголовок («ГОРМОНЫ») короче 12 символов тоже
+    # заголовок, поэтому строгий капс ловим без ограничения длины.
+    if upper_ratio >= 0.9:
+        return True
+    return upper_ratio > 0.7 and len(text) >= 12
+
+
+def _is_absorb_boundary(cells: list[str], cmap: ColumnMap) -> bool:
+    """Граница склейки: заголовок раздела (капс) или строка по ключевому слову
+    («подраздел 1.2 ...»). Дальше этой строки название не тянем."""
+    if _is_section_heading(cells):
+        return True
+    if cmap.name_idx is not None and cmap.name_idx < len(cells):
+        return cells[cmap.name_idx].strip().lower().startswith(_SECTION_KEYWORDS)
+    return False
+
+
+def _name_incomplete(name: str) -> bool:
+    """Название оборвано и продолжается ниже: пусто, кончается знаком переноса
+    или скобка не закрыта («... (Определение натрия (Na) в»)."""
+    n = name.strip()
+    if not n:
+        return True
+    if n[-1] in "(,/":
+        return True
+    return n.count("(") > n.count(")")
+
+
+def _anchor_needs_name(name: str, cmap: ColumnMap) -> bool:
+    """Ценовой строке нужно дотянуть название: оно пустое, это голый номер строки
+    (Клиника 4) или оборванный фрагмент."""
+    n = name.strip()
+    if not n:
+        return True
+    if cmap.name_has_index and _is_bare_index(n):
+        return True
+    return _name_incomplete(n)
+
+
+def _assembled_name(
+    members: list[int], cells_list: list[list[str]], cmap: ColumnMap, anchor: int
+) -> str:
+    """Название, собранное из колонки имени строк-членов (без голого номера)."""
+    parts: list[str] = []
+    for m in members:
+        cells = cells_list[m]
+        text = cells[cmap.name_idx].strip() if cmap.name_idx < len(cells) else ""
+        if not text:
+            continue
+        if m == anchor and cmap.name_has_index and _is_bare_index(text):
+            continue
+        parts.append(text)
+    return " ".join(parts)
+
+
+def _merge_member_cells(
+    members: list[int], cells_list: list[list[str]], cmap: ColumnMap, anchor: int
+) -> list[str]:
+    """Собирает ячейки склеенной строки: по каждой колонке склеивает текст всех
+    строк-членов в порядке Y (members уже отсортированы сверху вниз). Голый номер
+    строки в колонке названия (Клиника 4) выкидываем — это не часть имени."""
+    width = max(len(cells_list[m]) for m in members)
+    out = ["" for _ in range(width)]
+    for col in range(width):
+        parts: list[str] = []
+        for m in members:
+            cells = cells_list[m]
+            text = cells[col].strip() if col < len(cells) else ""
+            if not text:
+                continue
+            if (
+                col == cmap.name_idx
+                and m == anchor
+                and cmap.name_has_index
+                and _is_bare_index(text)
+            ):
+                continue
+            parts.append(text)
+        out[col] = " ".join(parts)
+    return out
 
 
 def stitch_multiline(
-    data_rows: list[Row], bounds: list[float], cmap: ColumnMap, max_absorb: int = 6
+    data_rows: list[Row], bounds: list[float], cmap: ColumnMap, max_absorb: int = 10
 ) -> list[Row]:
-    """Склейка многострочных названий услуг (issue #1).
+    """Склейка многострочных названий услуг в одну позицию (issue #1).
 
-    В части PDF (Клиника 3) одна логическая позиция разложена по нескольким
-    строкам Y: ценовая строка несёт биоматериал и цену, а само название (и код)
-    идут отдельными строками НИЖЕ. group_rows честно бьёт их по Y, из-за чего
-    название теряется, а в поле имени попадает биоматериал («кровь с ЭДТА»).
+    В части PDF логическая позиция разложена по нескольким строкам Y:
+    - Клиника 3: ценовая строка несёт биоматериал и цену, а название (и код) идут
+      строками НИЖЕ. group_rows бьёт их по Y, поэтому в имя попадал биоматериал
+      («кровь с ЭДТА») вместо «Общий анализ крови (ОАК без СОЭ)».
+    - Клиника 4: название обёрнуто ВОКРУГ ценовой строки (часть выше, часть ниже),
+      а в самой ценовой строке стоит только номер «6».
 
-    Здесь ценовая строка с ПУСТОЙ колонкой названия (anchor) поглощает
-    последующие строки без цены — их слова дописываются к anchor, пока не
-    встретится следующая ценовая строка или заголовок раздела. Слова разных
-    уровней Y корректно раскладываются по колонкам (assign_to_columns сортирует
-    по Y, X). Если у ценовой строки название уже есть — не трогаем (Клиника 4 и
-    штатные прайсы не задеваются, регрессий нет)."""
+    Ценовая строка (anchor), которой нужно дотянуть название, поглощает соседние
+    строки без цены: вниз — продолжения имени/кода, вверх — если своё имя пустое
+    или это голый номер. Останавливаемся на следующей ценовой строке и на границе
+    раздела. Текст каждой колонки склеивается отдельно в порядке чтения, поэтому
+    биоматериал и цена не попадают в имя. Ценовые строки с готовым названием не
+    трогаем (Клиника 4 «Выездная консультация врача» и штатные прайсы — без
+    регрессий)."""
     if cmap.name_idx is None or not cmap.price_idxs:
         return data_rows
 
-    result: list[Row] = []
-    i, n = 0, len(data_rows)
-    while i < n:
-        row = data_rows[i]
-        cells = assign_to_columns(row, bounds)
-        if not _row_is_priced(cells, cmap):
-            result.append(row)
-            i += 1
+    n = len(data_rows)
+    cells_list = [assign_to_columns(r, bounds) for r in data_rows]
+    priced = [_row_is_priced(c, cmap) for c in cells_list]
+    boundary = [_is_absorb_boundary(c, cmap) for c in cells_list]
+    claimed = [False] * n
+    members_of: dict[int, list[int]] = {}
+
+    for i in range(n):
+        if not priced[i]:
             continue
-        name_cell = cells[cmap.name_idx].strip() if cmap.name_idx < len(cells) else ""
-        if name_cell:
-            result.append(row)
-            i += 1
+        name = cells_list[i][cmap.name_idx].strip() if cmap.name_idx < len(cells_list[i]) else ""
+        if not _anchor_needs_name(name, cmap):
             continue
-        # anchor без названия: поглощаем последующие строки-продолжения.
-        merged = Row(words=list(row.words), top=row.top)
+        members = [i]
         absorbed = 0
+        # Вверх тянем только когда своего имени по сути нет (Клиника 4: имя над ценой).
+        if not name or (cmap.name_has_index and _is_bare_index(name)):
+            j = i - 1
+            while (
+                j >= 0 and absorbed < max_absorb
+                and not claimed[j] and not priced[j] and not boundary[j]
+            ):
+                members.insert(0, j)
+                claimed[j] = True
+                absorbed += 1
+                j -= 1
+        # Вниз тянем продолжения имени/кода до следующей цены или раздела.
         j = i + 1
-        while j < n and absorbed < max_absorb:
-            nxt_cells = assign_to_columns(data_rows[j], bounds)
-            if _row_is_priced(nxt_cells, cmap):
-                break
-            if _is_section_heading(nxt_cells):
-                break
-            merged.words.extend(data_rows[j].words)
+        while (
+            j < n and absorbed < max_absorb
+            and not claimed[j] and not priced[j] and not boundary[j]
+        ):
+            cand = cells_list[j][cmap.name_idx].strip() if cmap.name_idx < len(cells_list[j]) else ""
+            # Заглавная буква при уже целом названии — это начало следующей
+            # позиции (имя над своей ценой), не продолжение. Дальше не тянем.
+            if cand[:1].isupper():
+                sofar = _assembled_name(members, cells_list, cmap, i)
+                if sofar and not _name_incomplete(sofar):
+                    break
+            members.append(j)
+            claimed[j] = True
             absorbed += 1
             j += 1
-        result.append(merged)
-        i = j
+        if len(members) > 1:
+            members_of[i] = members
+            claimed[i] = True
+
+    result: list[Row] = []
+    for i in range(n):
+        if i in members_of:
+            result.append(
+                Row(
+                    words=list(data_rows[i].words),
+                    top=data_rows[i].top,
+                    cells=_merge_member_cells(members_of[i], cells_list, cmap, i),
+                )
+            )
+        elif not claimed[i]:
+            result.append(data_rows[i])
     return result

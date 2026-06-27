@@ -1,25 +1,29 @@
 """Тесты склейки многострочных названий услуг в PDF (issue #1).
 
-Проверяют две беды реальных прайсов на синтетических словах (без OCR/pdfplumber,
+Проверяют обе беды реальных прайсов на синтетических словах (без OCR/pdfplumber,
 поэтому стабильны в CI):
 - Клиника 3: название лежит на строках НИЖЕ ценовой строки, а в колонке имени
   ценовой строки пусто -> в имя попадает биоматериал «кровь с ЭДТА».
-- Клиника 4: колонка «№» слита с названием («9 Выездная консультация врача»),
-  из-за ведущего номера колонка названий ошибочно уезжает в цены, а имя в код.
+- Клиника 4: колонка «№» слита с названием («9 Выездная консультация врача»), а
+  иногда название обёрнуто вокруг ценовой строки с одним номером «6».
 """
 
 from app.pipeline.columns import (
     ColumnMap,
     Row,
     Word,
+    _is_bare_index,
     _is_index_sequence,
+    _is_section_heading,
     _looks_like_price,
+    _name_incomplete,
     analyze_table,
     assign_to_columns,
     infer_column_map,
     stitch_multiline,
     strip_leading_enumeration,
 )
+from app.pipeline.extractors.pdf_text import PdfTextExtractor
 
 
 def _w(text: str, x0: float, top: float) -> Word:
@@ -35,11 +39,12 @@ def _row(*words: Word) -> Row:
 
 
 def test_is_index_sequence_with_section_resets():
-    # Сквозной номер строки со сбросами на 1 в начале раздела.
     assert _is_index_sequence([9, 10, 1, 2, 3, 1, 2]) is True
     assert _is_index_sequence([1, 2, 3, 4, 5]) is True
     # Цены так не выглядят.
     assert _is_index_sequence([880, 1410, 3980, 2985]) is False
+    # Постоянная колонка (одинаковые цены) — НЕ нумерация (нет прогресса).
+    assert _is_index_sequence([5000, 5000, 5000, 5000]) is False
 
 
 def test_looks_like_price_handles_currency_and_leading_number():
@@ -59,26 +64,38 @@ def test_strip_leading_enumeration():
     assert strip_leading_enumeration("16600") == "16600"
 
 
-def test_assign_to_columns_preserves_top_then_left_order():
-    # После склейки слова разных уровней Y должны читаться сверху вниз,
-    # а не перемешиваться по X внутри колонки.
-    bounds = [0.0]
-    row = Row(
-        words=[
-            _w("формулой", 100, 60),  # вторая строка
-            _w("Клинический", 100, 40),  # первая строка, тот же X
-            _w("анализ", 200, 40),
-        ],
-        top=40,
-    )
-    assert assign_to_columns(row, bounds)[0] == "Клинический анализ формулой"
+def test_is_bare_index():
+    assert _is_bare_index("6") is True
+    assert _is_bare_index("10.") is True
+    assert _is_bare_index("3)") is True
+    assert _is_bare_index("6 Анализ") is False
+    assert _is_bare_index("16600") is False
+
+
+def test_name_incomplete():
+    # Незакрытая скобка / знак переноса — название продолжается ниже.
+    assert _name_incomplete("Определение натрия (Na) в (анализаторе") is True
+    assert _name_incomplete("Антитела к антигенам,") is True
+    assert _name_incomplete("Консультация терапевта") is False
+    assert _name_incomplete("Анализ крови (расширенный)") is False
+
+
+def test_is_section_heading():
+    # Короткий однословный капс — заголовок (Клиника 3: ЦИТОЛОГИЯ, ГОРМОНЫ).
+    assert _is_section_heading(["ЦИТОЛОГИЯ"]) is True
+    assert _is_section_heading(["ГОРМОНЫ"]) is True
+    assert _is_section_heading(["ИММУНОГЕМАТОЛОГИЧЕСКИЕ", "ИССЛЕДОВАНИЯ"]) is True
+    # Капсовое ПРОДОЛЖЕНИЕ названия (список антител) с цифрами — НЕ заголовок.
+    assert _is_section_heading(["PML, gp21,0, LK.M-1, LC-1, SLA/LP, Ro-52),"]) is False
+    # Сноска в скобках и строчное продолжение — не заголовок.
+    assert _is_section_heading(["(ОАК + СРБ. без СОЭ)"]) is False
+    assert _is_section_heading(["Подсчет ретикулоцитов"]) is False
 
 
 # --- Клиника 4: колонка «№» слита с названием -------------------------------
 
 
 def test_number_plus_name_column_is_name_not_price():
-    # Колонка, где ячейки «N <название>», должна стать именем, не ценой.
     bounds = [40.0, 300.0]
     rows = [
         _row(_w("9 Выездная консультация врача", 45, 10), _w("148500", 305, 10)),
@@ -92,9 +109,6 @@ def test_number_plus_name_column_is_name_not_price():
 
 
 def test_analyze_table_drops_row_number_as_code():
-    # Геометрия Клиники 4: «№» отдельной колонкой в заголовке, но в данных номер
-    # строки слит с названием (нет зазора). Колонка «Единица» отделяет цену.
-    # Заголовок: «№» (код) + «Единица» + «Цена» -> find_header по якорям.
     header = _row(_w("№", 45, 0), _w("Единица", 250, 0), _w("Цена", 330, 0))
     data = [
         _row(_w("9 Выездная консультация врача", 45, 20), _w("пакет", 250, 20), _w("148500", 330, 20)),
@@ -104,39 +118,51 @@ def test_analyze_table_drops_row_number_as_code():
     bounds, cmap, header_idx = analyze_table([header, *data])
     assert header_idx == 0
     assert cmap.name_idx is not None
-    # Сквозной номер строки не должен остаться кодом услуги.
     assert cmap.name_has_index is True
     assert cmap.code_idx is None
     name_cell = assign_to_columns(data[0], bounds)[cmap.name_idx]
     assert strip_leading_enumeration(name_cell) == "Выездная консультация врача"
 
 
+# --- assign_to_columns: обычная строка по X, склеенная по готовым ячейкам ----
+
+
+def test_assign_to_columns_normal_row_uses_x_order():
+    bounds = [0.0, 100.0]
+    row = _row(_w("Бета", 110, 40), _w("Альфа", 10, 40))
+    assert assign_to_columns(row, bounds) == ["Альфа", "Бета"]
+
+
+def test_assign_to_columns_uses_precomputed_cells():
+    row = Row(words=[], top=0.0, cells=["имя", "код", "100"])
+    assert assign_to_columns(row, [0.0, 1.0, 2.0]) == ["имя", "код", "100"]
+
+
 # --- Клиника 3: название на строках ниже ценовой ----------------------------
 
 
-def _k3_bounds_cmap():
+def _k3_bounds_cmap(name_has_index: bool = False):
     # Колонки: 1 имя, 2 код, 3 биоматериал, 4 цена.
     bounds = [80.0, 110.0, 315.0, 385.0, 465.0]
-    cmap = ColumnMap(name_idx=1, code_idx=2, price_idxs=[4])
+    cmap = ColumnMap(name_idx=1, code_idx=2, price_idxs=[4], name_has_index=name_has_index)
     return bounds, cmap
 
 
 def test_stitch_fills_empty_name_from_following_rows():
     bounds, cmap = _k3_bounds_cmap()
-    # Ценовая строка: имя пусто, есть биоматериал и цена.
     anchor = _row(_w("кровь с ЭДТА", 390, 43), _w("880", 470, 43))
     code_row = _row(_w("В02.110.002", 320, 47))
     name_row = _row(_w("Общий анализ крови (ОАК без СОЭ)", 115, 50))
-    # Следующая ценовая строка — граница склейки.
     next_anchor = _row(_w("кровь с ЭДТА", 390, 55), _w("3980", 470, 55))
 
     stitched = stitch_multiline([anchor, code_row, name_row, next_anchor], bounds, cmap)
-    # Три строки до next_anchor схлопнулись в одну, плюс next_anchor.
     assert len(stitched) == 2
     cells = assign_to_columns(stitched[0], bounds)
     assert cells[cmap.name_idx] == "Общий анализ крови (ОАК без СОЭ)"
     assert cells[cmap.code_idx] == "В02.110.002"
     assert cells[4] == "880"
+    # Биоматериал остаётся в своей колонке, в имя не течёт.
+    assert cells[3] == "кровь с ЭДТА"
 
 
 def test_stitch_assembles_multiline_name_in_order():
@@ -155,25 +181,119 @@ def test_stitch_assembles_multiline_name_in_order():
     )
 
 
+def test_stitch_partial_name_anchor_absorbs_continuation():
+    # T4: у ценовой строки имя уже есть, но оборвано (скобка не закрыта) —
+    # продолжение со строки ниже должно дотянуться.
+    bounds, cmap = _k3_bounds_cmap()
+    anchor = _row(_w("Na (натрий) (Определение натрия (Na) в", 115, 40), _w("700", 470, 40))
+    cont = _row(_w("сыворотке крови на анализаторе)", 115, 52))
+    next_anchor = _row(_w("Общий белок", 115, 64), _w("900", 470, 64))
+    stitched = stitch_multiline([anchor, cont, next_anchor], bounds, cmap)
+    assert len(stitched) == 2
+    assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == (
+        "Na (натрий) (Определение натрия (Na) в сыворотке крови на анализаторе)"
+    )
+
+
+def test_stitch_bare_number_anchor_absorbs_above_and_below():
+    # C2 (Клиника 4): название обёрнуто вокруг ценовой строки с одним номером.
+    bounds = [40.0, 250.0, 330.0]
+    cmap = ColumnMap(name_idx=0, price_idxs=[2], name_has_index=True)
+    line1 = _row(_w("Удаление ногтевой пластины (вследствие травмы, вросшего", 45, 392))
+    anchor = _row(_w("6", 45, 397), _w("операция", 250, 397), _w("17600", 330, 397))
+    line2 = _row(_w("ногтя, грибкового поражения)", 45, 404))
+    next_anchor = _row(_w("Перевязка", 45, 420), _w("раз", 250, 420), _w("3000", 330, 420))
+    stitched = stitch_multiline([line1, anchor, line2, next_anchor], bounds, cmap)
+    names = [assign_to_columns(r, bounds)[0] for r in stitched]
+    assert "Удаление ногтевой пластины (вследствие травмы, вросшего ногтя, грибкового поражения)" in names
+    # Голый номер «6» не остался названием.
+    assert "6" not in names
+
+
 def test_stitch_stops_at_uppercase_section_heading():
     bounds, cmap = _k3_bounds_cmap()
     anchor = _row(_w("кровь с ЭДТА", 390, 136), _w("1340", 470, 136))
     name_row = _row(_w("Подсчет ретикулоцитов", 115, 143))
     section = _row(_w("ИММУНОГЕМАТОЛОГИЧЕСКИЕ ИССЛЕДОВАНИЯ", 115, 151))
     next_anchor = _row(_w("кровь с ЭДТА", 390, 161), _w("2320", 470, 161))
-
     stitched = stitch_multiline([anchor, name_row, section, next_anchor], bounds, cmap)
-    # anchor + name_row склеились; секция и next_anchor остались отдельными.
     assert len(stitched) == 3
     assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == "Подсчет ретикулоцитов"
     assert "ИММУНОГЕМАТОЛОГИЧЕСКИЕ" in assign_to_columns(stitched[1], bounds)[cmap.name_idx]
 
 
+def test_stitch_stops_at_short_section_heading():
+    # EH-1: короткий капсовый заголовок (ЦИТОЛОГИЯ) тоже граница, не часть имени.
+    bounds, cmap = _k3_bounds_cmap()
+    anchor = _row(_w("кровь с ЭДТА", 390, 40), _w("880", 470, 40))
+    name_row = _row(_w("Реакция Вассермана", 115, 47))
+    section = _row(_w("ЦИТОЛОГИЯ", 115, 55))
+    next_anchor = _row(_w("кровь с ЭДТА", 390, 63), _w("1500", 470, 63))
+    stitched = stitch_multiline([anchor, name_row, section, next_anchor], bounds, cmap)
+    assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == "Реакция Вассермана"
+    assert any(
+        assign_to_columns(r, bounds)[cmap.name_idx] == "ЦИТОЛОГИЯ" for r in stitched
+    )
+
+
+def test_stitch_absorbs_allcaps_continuation_with_digits():
+    # EH-2: капсовое продолжение названия с цифрами (список антител) НЕ заголовок,
+    # должно склеиться, а не разорвать услугу на три.
+    bounds, cmap = _k3_bounds_cmap()
+    anchor = _row(_w("кровь с ЭДТА", 390, 376), _w("34000", 470, 376))
+    line1 = _row(_w("Антитела к антигенам печени (АМА-М2, М2-ЗЕ,", 115, 381))
+    line2 = _row(_w("PML, gp21,0, LK.M-1, LC-1, SLA/LP, Ro-52),", 115, 392))
+    line3 = _row(_w("иммуноблот", 115, 404))
+    next_anchor = _row(_w("кровь с ЭДТА", 390, 416), _w("2000", 470, 416))
+    stitched = stitch_multiline([anchor, line1, line2, line3, next_anchor], bounds, cmap)
+    name = assign_to_columns(stitched[0], bounds)[cmap.name_idx]
+    assert "PML, gp21,0, LK.M-1, LC-1, SLA/LP, Ro-52)," in name
+    assert name.endswith("иммуноблот")
+
+
+def test_stitch_does_not_steal_following_named_item():
+    # Целое название не тянет за собой первую строку следующей позиции.
+    bounds, cmap = _k3_bounds_cmap()
+    anchor = _row(_w("Удаление атеромы (полное)", 115, 40), _w("100000", 470, 40))
+    next_name = _row(_w("Краевая резекция ногтевой пластины", 115, 52))
+    next_anchor = _row(_w("кровь с ЭДТА", 390, 64), _w("25000", 470, 64))
+    stitched = stitch_multiline([anchor, next_name, next_anchor], bounds, cmap)
+    assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == "Удаление атеромы (полное)"
+
+
 def test_stitch_is_noop_when_name_present():
-    # Штатные прайсы: у ценовой строки имя уже есть -> склейки нет, регрессий нет.
     bounds, cmap = _k3_bounds_cmap()
     r1 = _row(_w("Консультация терапевта", 115, 40), _w("9000", 470, 40))
     r2 = _row(_w("Консультация хирурга", 115, 52), _w("12000", 470, 52))
     stitched = stitch_multiline([r1, r2], bounds, cmap)
     assert len(stitched) == 2
     assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == "Консультация терапевта"
+
+
+def test_stitch_max_absorb_boundary():
+    # T1: при достижении max_absorb лишние строки не теряются — остаются отдельно.
+    bounds, cmap = _k3_bounds_cmap()
+    anchor = _row(_w("кровь с ЭДТА", 390, 40), _w("880", 470, 40))
+    conts = [_row(_w(f"строка{k}", 115, 50 + 10 * k)) for k in range(4)]
+    stitched = stitch_multiline([anchor, *conts], bounds, cmap, max_absorb=2)
+    assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == "строка0 строка1"
+    # Оставшиеся две строки сохранены, не проглочены молча.
+    leftover = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched[1:]]
+    assert leftover == ["строка2", "строка3"]
+
+
+# --- интеграция через экстрактор (T3) ---------------------------------------
+
+
+def test_extractor_read_name_strips_row_number_k4():
+    # Имя «9 Выездная консультация врача» в колонке «№» -> читается без номера.
+    cmap = ColumnMap(name_idx=0, code_idx=None, price_idxs=[1], name_has_index=True)
+    cells = ["9 Выездная консультация врача", "148500"]
+    assert PdfTextExtractor._read_name(cells, cmap) == "Выездная консультация врача"
+
+
+def test_extractor_read_name_keeps_number_without_index_flag():
+    # Без флага name_has_index ведущую цифру настоящего названия не трогаем.
+    cmap = ColumnMap(name_idx=0, code_idx=None, price_idxs=[1], name_has_index=False)
+    cells = ["3D реконструкция", "5000"]
+    assert PdfTextExtractor._read_name(cells, cmap) == "3D реконструкция"
