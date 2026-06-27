@@ -174,12 +174,73 @@ def rematch(args: list[str]) -> None:
         db.close()
 
 
+def accuracy_check(args: list[str]) -> None:
+    """Точность авто-матчей по КОД-ИСТИНЕ (честная проверка ≥85%).
+
+    На позициях, чей код тарификатора резолвится в РОВНО 1 услугу справочника
+    (известная верная пара), гоним ТЕКСТОВЫЙ каскад с code=None и сверяем
+    авто-выбор арбитра с код-истиной. Так измеряется точность арбитра, а не код-
+    матча. args[0] — лимит проверенных позиций.
+    """
+    from sqlalchemy import select
+
+    from app.models import MatchMethod, PriceItem
+    from app.normalization.cascade import MatchCascade
+    from app.normalization.normalize import normalize_code
+
+    cap = int(args[0]) if args else None
+    db = SessionLocal()
+    try:
+        cascade = MatchCascade(db)
+        items = (
+            db.execute(
+                select(PriceItem).where(
+                    PriceItem.is_active.is_(True),
+                    PriceItem.service_code_source.is_not(None),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        checked = correct = 0
+        sample: list[tuple[str, bool]] = []
+        for item in items:
+            nc = normalize_code(item.service_code_source)
+            if not nc:
+                continue
+            hits = cascade.lexical.by_code(nc)
+            if len(hits) != 1:
+                continue  # код-истина только при однозначном коде
+            truth = hits[0].service_id
+            oc = cascade.match(item.service_name_raw, item.category, code=None)
+            if oc.is_auto and oc.method == MatchMethod.llm:
+                checked += 1
+                ok = oc.service_id == truth
+                correct += int(ok)
+                if len(sample) < 15:
+                    sample.append((item.service_name_raw.strip()[:48], ok))
+                if cap and checked >= cap:
+                    break
+        if checked:
+            print(
+                f"Точность арбитр-авто по код-истине: {correct}/{checked} = "
+                f"{correct / checked * 100:.1f}%"
+            )
+        else:
+            print("Арбитр-авто на код-истинной выборке не найдено")
+        for nm, ok in sample:
+            print(("  OK  " if ok else "  X   ") + nm)
+    finally:
+        db.close()
+
+
 COMMANDS = {
     "seed-reference": seed_reference,
     "ingest": ingest,
     "reembed": reembed,
     "embed-items": embed_items,
     "rematch": rematch,
+    "accuracy-check": accuracy_check,
 }
 
 
