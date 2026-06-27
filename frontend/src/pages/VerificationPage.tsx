@@ -128,6 +128,22 @@ export default function VerificationPage() {
 
   const searchTimer = useRef<number | null>(null);
 
+  // Refs для стабильного доступа из обработчика клавиш без пере-подписки.
+  const stateRef = useRef({
+    loading, submitting, correctMode, cursor, offset,
+    items, selectedServiceId, total,
+  });
+  useEffect(() => {
+    stateRef.current = {
+      loading, submitting, correctMode, cursor, offset,
+      items, selectedServiceId, total,
+    };
+  });
+
+  // Стабильные рефы для действий — инициализируются здесь, обновляются ниже.
+  const onConfirmRef = useRef<() => void>(() => {});
+  const onRejectRef = useRef<() => void>(() => {});
+
   const loadPage = useCallback(
     async (nextOffset: number, keepCursor = false) => {
       setLoading(true);
@@ -165,6 +181,63 @@ export default function VerificationPage() {
     setSearchResults([]);
     setSelectedServiceId(current?.candidates?.[0]?.service_id ?? null);
   }, [current?.item_id]);
+
+  // Горячие клавиши: навигация и действия без мыши.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA";
+
+      // Escape всегда закрывает режим исправления, даже из поля ввода.
+      if (e.key === "Escape" && stateRef.current.correctMode) {
+        e.preventDefault();
+        setCorrectMode(false);
+        setSearchTerm("");
+        setSearchResults([]);
+        return;
+      }
+
+      if (inInput || stateRef.current.loading || stateRef.current.submitting) return;
+      if (stateRef.current.correctMode) return;
+
+      const { cursor: cur, offset: off, items: its, selectedServiceId: sid } = stateRef.current;
+
+      switch (e.key) {
+        case "ArrowRight":
+        case "j":
+          e.preventDefault();
+          if (cur + 1 < its.length) setCursor((c) => c + 1);
+          break;
+        case "ArrowLeft":
+        case "k":
+          e.preventDefault();
+          if (cur > 0) setCursor((c) => c - 1);
+          else if (off > 0) void loadPage(Math.max(0, off - PAGE_SIZE));
+          break;
+        case "Enter":
+        case "y":
+          if (sid) { e.preventDefault(); onConfirmRef.current(); }
+          break;
+        case "x":
+          e.preventDefault();
+          onRejectRef.current();
+          break;
+        case "e":
+          e.preventDefault();
+          setCorrectMode(true);
+          break;
+        case "1": case "2": case "3": case "4": case "5": {
+          const idx = parseInt(e.key) - 1;
+          const cand = its[cur]?.candidates?.[idx];
+          if (cand) { e.preventDefault(); setSelectedServiceId(cand.service_id); }
+          break;
+        }
+        default: break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [loadPage]);
 
   // Поиск услуг для режима исправления (с задержкой).
   useEffect(() => {
@@ -257,6 +330,10 @@ export default function VerificationPage() {
   const onReject = useCallback(() => {
     void runAction("reject", null);
   }, [runAction]);
+
+  // Синхронизируем рефы с текущими коллбэками после каждого ре-рендера.
+  useEffect(() => { onConfirmRef.current = onConfirm; }, [onConfirm]);
+  useEffect(() => { onRejectRef.current = onReject; }, [onReject]);
 
   const onCorrect = useCallback(
     (serviceId: string, serviceName: string) => {
@@ -552,6 +629,7 @@ export default function VerificationPage() {
                     Отклонить
                   </Button>
                 </div>
+                <KbdHints />
               </div>
             )}
           </div>
@@ -734,6 +812,38 @@ function CorrectPanel({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Клавишная подсказка: маленький ярлык для клавиши.
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-[2px] border border-neutral-300 bg-neutral-100 px-1 font-mono text-[10px] leading-none text-neutral-500">
+      {children}
+    </kbd>
+  );
+}
+
+// Панель горячих клавиш под кнопками действий.
+function KbdHints() {
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 border-t border-dashed border-line pt-3">
+      {(
+        [
+          [["Enter", "y"], "подтвердить"],
+          [["x"], "отклонить"],
+          [["e"], "исправить"],
+          [["←", "→"], "навигация"],
+          [["1–3"], "кандидат"],
+          [["Esc"], "отмена"],
+        ] as [string[], string][]
+      ).map(([keys, label]) => (
+        <span key={label} className="flex items-center gap-1 text-xs text-neutral-400">
+          {keys.map((k) => <Kbd key={k}>{k}</Kbd>)}
+          <span>{label}</span>
+        </span>
+      ))}
     </div>
   );
 }
