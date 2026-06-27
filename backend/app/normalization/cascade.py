@@ -107,7 +107,10 @@ class MatchCascade:
             best_h.service_id, best_h.service_name, max(0.95, best_sc), MatchMethod.code, candidates
         )
 
-    def match(self, raw: str, category: str | None = None, code: str | None = None) -> MatchOutcome:
+    def match(
+        self, raw: str, category: str | None = None, code: str | None = None,
+        use_arbiter: bool = True,
+    ) -> MatchOutcome:
         # Уровень 0: детерминированный матч по коду тарификатора (Задача B).
         # Самый надёжный путь, без AI. Идёт ПЕРЕД текстовым каскадом.
         nc = normalize_code(code)
@@ -177,7 +180,7 @@ class MatchCascade:
         # Уровень 5: LLM арбитр по ВСЕЙ полосе [match_low, match_high).
         # Полоса опущена до 0.40 — арбитр судит корректность кандидата, поэтому
         # точность держится; его "да" = авто-матч, "нет" = неадресуемо.
-        if settings.match_low_threshold <= best.score < settings.match_high_threshold:
+        if use_arbiter and settings.match_low_threshold <= best.score < settings.match_high_threshold:
             topn = candidates[: settings.arbiter_candidates]
             verdict = arbitrate(self.db, raw, category, [c.service_name for c in topn])
             if verdict:

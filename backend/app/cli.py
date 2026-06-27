@@ -174,6 +174,88 @@ def rematch(args: list[str]) -> None:
         db.close()
 
 
+def warm_arbiter(args: list[str]) -> None:
+    """Конкурентный пред-прогрев кэша вердиктов арбитра по полосе [low, high).
+
+    Пред-проход (без арбитра) собирает уникальные пограничные запросы, затем
+    они запрашиваются у gpt-4o-mini в несколько потоков и кладутся в ai_cache.
+    После этого rematch берёт вердикты из кэша и идёт быстро. args[0] — лимит.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.models import AICache, PriceItem
+    from app.normalization import llm_arbiter as arb
+    from app.normalization.cascade import MatchCascade
+
+    limit = int(args[0]) if args else None
+    workers = int(os.getenv("WARM_WORKERS", "12"))
+    db = SessionLocal()
+    try:
+        arb.reset_usage()
+        cascade = MatchCascade(db)
+        q = select(PriceItem).where(PriceItem.is_active.is_(True)).order_by(PriceItem.item_id)
+        if limit:
+            q = q.limit(limit)
+        items = list(db.execute(q).scalars().all())
+
+        # Пред-проход без арбитра: собрать уникальные пограничные запросы.
+        todo: dict[str, tuple[str, str | None, list[str]]] = {}
+        for item in items:
+            oc = cascade.match(
+                item.service_name_raw, item.category, item.service_code_source, use_arbiter=False
+            )
+            in_band = (
+                oc.service_id is None
+                and oc.candidates
+                and settings.match_low_threshold <= oc.score < settings.match_high_threshold
+            )
+            if not in_band:
+                continue
+            cands = [c.service_name for c in oc.candidates[: settings.arbiter_candidates]]
+            k = arb.cache_key(item.service_name_raw, cands)
+            if k and k not in todo:
+                todo[k] = (item.service_name_raw, item.category, cands)
+        print(f"Уникальных пограничных запросов: {len(todo)}", flush=True)
+
+        existing = set()
+        if todo:
+            existing = set(
+                db.execute(
+                    select(AICache.cache_key).where(AICache.cache_key.in_(list(todo)))
+                ).scalars().all()
+            )
+        pending = {k: v for k, v in todo.items() if k not in existing}
+        print(f"в кэше уже {len(existing)}, к запросу {len(pending)} в {workers} потоков", flush=True)
+
+        def work(kv: tuple[str, tuple[str, str | None, list[str]]]):
+            k, (query, cat, cands) = kv
+            return k, arb.verdict_for(query, cat, cands)
+
+        results: list[tuple[str, dict]] = []
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for k, v in (f.result() for f in as_completed([ex.submit(work, kv) for kv in pending.items()])):
+                if v is not None:
+                    results.append((k, v))
+                done += 1
+                if done % 250 == 0:
+                    print(f"  ... {done}/{len(pending)}", flush=True)
+
+        for k, v in results:
+            db.add(AICache(kind="llm", cache_key=k, payload=v))
+        db.commit()
+        u = arb.get_usage()
+        print(
+            f"Прогрето вердиктов {len(results)} | арбитр вызовов {u['calls']} "
+            f"токены вход {u['prompt_tokens']} выход {u['completion_tokens']}"
+        )
+    finally:
+        db.close()
+
+
 def accuracy_check(args: list[str]) -> None:
     """Точность авто-матчей по КОД-ИСТИНЕ (честная проверка ≥85%).
 
@@ -239,6 +321,7 @@ COMMANDS = {
     "ingest": ingest,
     "reembed": reembed,
     "embed-items": embed_items,
+    "warm-arbiter": warm_arbiter,
     "rematch": rematch,
     "accuracy-check": accuracy_check,
 }
