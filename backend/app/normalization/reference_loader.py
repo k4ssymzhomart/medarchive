@@ -19,10 +19,12 @@ from app.normalization import embeddings as emb
 from app.normalization.normalize import normalize
 
 # Гибкий маппинг возможных названий колонок справочника.
+# Реальный «Справочник услуг.xlsx»: Name_ru (название), Специальность (категория),
+# TarificatrCode (код тарификатора -> кладём в icd_code).
 FIELD_ALIASES = {
-    "service_name": ("service_name", "name", "наименование", "услуга", "название"),
-    "category": ("category", "категория", "раздел", "группа"),
-    "icd_code": ("icd_code", "icd", "мкб", "код"),
+    "service_name": ("service_name", "name", "name_ru", "наименование", "услуга", "название"),
+    "category": ("category", "категория", "раздел", "группа", "специальность"),
+    "icd_code": ("icd_code", "icd", "мкб", "код", "tarificatrcode", "тарификатор", "код тарификатора"),
     "synonyms": ("synonyms", "синонимы", "synonym"),
 }
 
@@ -58,18 +60,34 @@ def load_reference_records(path: str) -> list[dict]:
 
 
 def upsert_services(db: Session, records: list[dict], compute_embeddings: bool = True) -> int:
-    """Создаёт/обновляет услуги справочника. Возвращает число добавленных."""
+    """Создаёт/обновляет услуги справочника. Возвращает число добавленных.
+
+    Дедуп по паре (нормализованное имя + код тарификатора): в справочнике
+    одинаковые названия встречаются в разных специальностях с разными кодами,
+    схлопывать их по одному имени нельзя (раздел 2, замечание о дедупликации).
+    """
     added = 0
+    seen: set[tuple[str, str | None]] = set()
     for rec in records:
         name = _pick(rec, "service_name")
         if not name:
             continue
         name = str(name).strip()
         norm = normalize(name)
+        icd_raw = _pick(rec, "icd_code")
+        icd = str(icd_raw).strip() if icd_raw not in (None, "") else None
+
+        key = (norm, icd)
+        if key in seen:
+            continue
         existing = db.execute(
-            select(Service).where(Service.service_name_normalized == norm)
+            select(Service).where(
+                Service.service_name_normalized == norm,
+                Service.icd_code == icd if icd is not None else Service.icd_code.is_(None),
+            )
         ).scalar_one_or_none()
         if existing:
+            seen.add(key)
             continue
 
         syn = _pick(rec, "synonyms") or []
@@ -81,9 +99,10 @@ def upsert_services(db: Session, records: list[dict], compute_embeddings: bool =
             service_name_normalized=norm,
             synonyms=list(syn),
             category=str(category).strip() if category else None,
-            icd_code=(str(_pick(rec, "icd_code")).strip() if _pick(rec, "icd_code") else None),
+            icd_code=icd,
         )
         db.add(svc)
+        seen.add(key)
         added += 1
     db.flush()
 

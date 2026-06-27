@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
+from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ from app.normalization import embeddings as emb
 from app.normalization import rerank as rr
 from app.normalization.lexical import LexicalIndex
 from app.normalization.llm_arbiter import arbitrate
+from app.normalization.normalize import normalize, normalize_code
 
 
 @dataclass
@@ -50,17 +52,18 @@ class MatchCascade:
         self.lexical = lexical or LexicalIndex.from_db(db)
 
     # --- уровень 3: семантический поиск в pgvector ---
-    def _semantic(self, raw: str, category: str | None, top_k: int = 20) -> list[Candidate]:
+    def _semantic(self, raw: str, top_k: int = 20) -> list[Candidate]:
+        # Задача C: НЕ фильтруем по категории. Таксономия справочника
+        # (специальность) и раздела прайса разные, жёсткое равенство убивает recall.
         vector = emb.embed_text(self.db, raw)
         if vector is None:
             return []
         stmt = (
             select(Service, Service.embedding.cosine_distance(vector).label("dist"))
             .where(Service.is_active.is_(True), Service.embedding.is_not(None))
+            .order_by("dist")
+            .limit(top_k)
         )
-        if category:
-            stmt = stmt.where(Service.category == category)
-        stmt = stmt.order_by("dist").limit(top_k)
         rows = self.db.execute(stmt).all()
         out: list[Candidate] = []
         for rank, (svc, dist) in enumerate(rows):
@@ -68,7 +71,42 @@ class MatchCascade:
             out.append(Candidate(svc.service_id, svc.service_name, score, MatchMethod.embedding, rank))
         return out
 
-    def match(self, raw: str, category: str | None = None) -> MatchOutcome:
+    # --- уровень 0: детерминированный матч по коду тарификатора ---
+    def _match_by_code(self, raw: str, nc: str) -> MatchOutcome | None:
+        hits = self.lexical.by_code(nc)
+        if not hits:
+            return None
+        if len(hits) == 1:
+            s = hits[0]
+            return MatchOutcome(
+                s.service_id, s.service_name, 0.98, MatchMethod.code,
+                [Candidate(s.service_id, s.service_name, 0.98, MatchMethod.code, 0)],
+            )
+        # Неоднозначный код: дизамбигуируем текстом ТОЛЬКО среди hits.
+        qn = normalize(raw)
+        scored = sorted(
+            ((fuzz.token_sort_ratio(qn, normalize(h.service_name)) / 100.0, h) for h in hits),
+            key=lambda t: t[0],
+            reverse=True,
+        )
+        candidates = [
+            Candidate(h.service_id, h.service_name, max(0.95, sc) if i == 0 else sc, MatchMethod.code, i)
+            for i, (sc, h) in enumerate(scored)
+        ]
+        best_sc, best_h = scored[0]
+        return MatchOutcome(
+            best_h.service_id, best_h.service_name, max(0.95, best_sc), MatchMethod.code, candidates
+        )
+
+    def match(self, raw: str, category: str | None = None, code: str | None = None) -> MatchOutcome:
+        # Уровень 0: детерминированный матч по коду тарификатора (Задача B).
+        # Самый надёжный путь, без AI. Идёт ПЕРЕД текстовым каскадом.
+        nc = normalize_code(code)
+        if nc:
+            code_outcome = self._match_by_code(raw, nc)
+            if code_outcome is not None:
+                return code_outcome
+
         # Уровень 1: точное совпадение.
         exact = self.lexical.exact(raw)
         if exact:
@@ -80,8 +118,8 @@ class MatchCascade:
                 candidates=[Candidate(exact.service_id, exact.service_name, 1.0, MatchMethod.exact, 0)],
             )
 
-        # Уровень 2: лексический RapidFuzz.
-        lex = self.lexical.search(raw, limit=20, category=category)
+        # Уровень 2: лексический RapidFuzz. Категорию НЕ передаём как фильтр (Задача C).
+        lex = self.lexical.search(raw, limit=20, category=None)
         lex_cands = [
             Candidate(e.service_id, e.service_name, s, MatchMethod.fuzzy, i)
             for i, (e, s) in enumerate(lex)
@@ -91,7 +129,7 @@ class MatchCascade:
             return MatchOutcome(best.service_id, best.service_name, best.score, MatchMethod.fuzzy, lex_cands)
 
         # Уровень 3: семантический (эмбеддинги).
-        sem_cands = self._semantic(raw, category)
+        sem_cands = self._semantic(raw)
 
         # Слияние кандидатов лексики и семантики (берём максимум score по сервису).
         merged: dict[uuid.UUID, Candidate] = {}

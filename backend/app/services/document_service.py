@@ -151,7 +151,7 @@ def process_document(db: Session, doc_id: uuid.UUID) -> PriceDocument:
         cascade = MatchCascade(db)
         review_count = 0
         for item in saved_items:
-            outcome = cascade.match(item.service_name_raw, item.category)
+            outcome = cascade.match(item.service_name_raw, item.category, item.service_code_source)
             apply_match(db, item, outcome)
             apply_versioning(db, item)
             if item.needs_review or item.service_id is None:

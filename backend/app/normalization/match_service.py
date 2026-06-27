@@ -53,7 +53,7 @@ def apply_match(db: Session, item: PriceItem, outcome: MatchOutcome) -> None:
 
 def match_item(db: Session, item: PriceItem, cascade: MatchCascade | None = None) -> MatchOutcome:
     cascade = cascade or MatchCascade(db)
-    outcome = cascade.match(item.service_name_raw, item.category)
+    outcome = cascade.match(item.service_name_raw, item.category, item.service_code_source)
     apply_match(db, item, outcome)
     return outcome
 
