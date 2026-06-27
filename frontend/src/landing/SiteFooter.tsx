@@ -1,32 +1,31 @@
-// Футер (тёмный). Бренд плюс колонки ссылок. Без фейковых сертификатов.
-// Ссылки ведут на разделы продукта или якоря, внешних интеграций пока нет.
+// Футер (тёмный). Бренд плюс колонки ссылок. Русский, без фейковых сертификатов.
 
 import { BrandMark } from "./BrandMark";
 
 const COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
   {
-    title: "Компания",
+    title: "Продукт",
     links: [
-      { label: "О нас", href: "#value" },
-      { label: "Команда", href: "#value" },
-      { label: "Карьера", href: "#value" },
+      { label: "Возможности", href: "#features" },
+      { label: "Как это работает", href: "#pipeline" },
+      { label: "Открыть приложение", href: "/app" },
     ],
   },
   {
-    title: "Ресурсы",
+    title: "Компания",
     links: [
-      { label: "Цены", href: "#cta" },
-      { label: "Документация API", href: "/app" },
-      { label: "Поддержка", href: "#cta" },
+      { label: "О нас", href: "#cta" },
+      { label: "Команда", href: "#cta" },
+      { label: "Карьера", href: "#cta" },
     ],
   },
 ];
 
-export function Footer() {
+export function SiteFooter() {
   return (
     <footer id="footer" className="bg-ink text-paper">
       <div className="mx-auto max-w-content px-6 py-20">
-        <div className="grid gap-12 md:grid-cols-[1.4fr_1fr_1fr]">
+        <div className="grid gap-12 md:grid-cols-[1.6fr_1fr_1fr]">
           <div>
             <BrandMark tone="paper" />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">
@@ -51,7 +50,6 @@ export function Footer() {
             </div>
           ))}
         </div>
-
         <div className="mt-16 flex flex-col gap-4 border-t border-surface-line pt-8 text-sm text-muted md:flex-row md:items-center md:justify-between">
           <span>Все права защищены © 2026 MedPartners</span>
           <div className="flex gap-6">
@@ -68,4 +66,4 @@ export function Footer() {
   );
 }
 
-export default Footer;
+export default SiteFooter;

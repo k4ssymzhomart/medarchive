@@ -1,31 +1,35 @@
-// Появление секций по скроллу. Уважает prefers-reduced-motion:
-// при пониженном движении контент показывается сразу, без сдвига и блюра.
+// Reveal как семья вариантов по интенту, а не один фейд на всё (landing-page-craft.md).
+// При prefers-reduced-motion показываем финальное состояние сразу, без сдвига.
 
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import { reveals } from "../lib/motion";
+
+type Intent = keyof typeof reveals;
 
 export function Reveal({
   children,
-  delay = 0,
+  intent = "sequence",
+  amount = 0.3,
+  margin = "0px 0px -10% 0px",
   className = "",
 }: {
   children: ReactNode;
-  delay?: number;
+  intent?: Intent;
+  amount?: number;
+  margin?: string;
   className?: string;
 }) {
   const reduce = useReducedMotion();
-
-  if (reduce) {
-    return <div className={className}>{children}</div>;
-  }
+  if (reduce) return <div className={className}>{children}</div>;
 
   return (
     <motion.div
       className={className}
-      initial={{ opacity: 0, y: 16, filter: "blur(6px)" }}
-      whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-      viewport={{ once: true, margin: "0px 0px -12% 0px" }}
-      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1], delay }}
+      variants={reveals[intent]}
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once: true, amount, margin: margin as never }}
     >
       {children}
     </motion.div>
