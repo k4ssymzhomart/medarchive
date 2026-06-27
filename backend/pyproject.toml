@@ -1,0 +1,21 @@
+[project]
+name = "medpartners-backend"
+version = "1.0.0"
+description = "MedPartners. Конвейер доверия к данным прайсов клиник."
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = [
+    "B008",   # FastAPI Depends в дефолтах
+    "B905",   # zip(strict=) необязателен для нашего кода
+    "UP042",  # (str, Enum) намеренно ради сериализации значений
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
