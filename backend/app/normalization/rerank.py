@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 
 import httpx
 from sqlalchemy import select
@@ -15,6 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import AICache
+
+log = logging.getLogger(__name__)
+
+# Любой сбой сети/ответа AI = деградация на порядок эмбеддингов (issue #19).
+_AI_ERRORS = (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError)
 
 
 def _key(query: str, docs: list[str]) -> str:
@@ -33,20 +39,24 @@ def rerank(db: Session, query: str, documents: list[str], top_n: int | None = No
     if not settings.cohere_api_key:
         return None
 
-    resp = httpx.post(
-        "https://api.cohere.com/v2/rerank",
-        headers={"Authorization": f"Bearer {settings.cohere_api_key}"},
-        json={
-            "model": settings.rerank_model,
-            "query": query,
-            "documents": documents,
-            "top_n": top_n or len(documents),
-        },
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    results = resp.json()["results"]
-    parsed = [(r["index"], float(r["relevance_score"])) for r in results]
+    try:
+        resp = httpx.post(
+            "https://api.cohere.com/v2/rerank",
+            headers={"Authorization": f"Bearer {settings.cohere_api_key}"},
+            json={
+                "model": settings.rerank_model,
+                "query": query,
+                "documents": documents,
+                "top_n": top_n or len(documents),
+            },
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        results = resp.json()["results"]
+        parsed = [(r["index"], float(r["relevance_score"])) for r in results]
+    except _AI_ERRORS as exc:
+        log.warning("Реранк недоступен, используем порядок эмбеддингов: %s", exc)
+        return None
     db.add(
         AICache(
             kind="rerank",
