@@ -23,6 +23,7 @@ from app.pipeline.columns import (
     ColumnMap,
     Row,
     Word,
+    _is_document_preamble,
     analyze_table,
     assign_to_columns,
     group_rows,
@@ -161,6 +162,11 @@ class PdfTextExtractor(Extractor):
         """
         cells = assign_to_columns(row, bounds)
         if not any(c.strip() for c in cells):
+            return None, None
+
+        # Преамбула договора («Приложение № 1 ... от 01.01.2026») это не услуга:
+        # дата иначе парсится как цена и строка уходит в позиции мусором.
+        if _is_document_preamble(row.text()):
             return None, None
 
         # Парсим цены по тарифным колонкам заголовка.

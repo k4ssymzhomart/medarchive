@@ -14,8 +14,10 @@ from app.pipeline.columns import (
     Word,
     _is_absorb_boundary,
     _is_bare_index,
+    _is_document_preamble,
     _is_index_sequence,
     _is_section_heading,
+    _line_gap_limit,
     _looks_like_price,
     _name_column_has_indices,
     _name_incomplete,
@@ -198,17 +200,17 @@ def test_stitch_leaves_partial_name_anchor_untouched():
 
 
 def test_stitch_stops_at_big_vertical_gap():
-    # Преамбула/чужая строка выше отделена крупным зазором -> вверх не тянем.
+    # Чужая строка выше отделена крупным вертикальным зазором -> вверх не тянем.
     bounds, cmap = _k3_bounds_cmap()
-    far = _row(_w("Прейскурант на медицинские услуги", 115, 10))  # большой зазор ниже
+    far = _row(_w("Цитологическое исследование мазка", 115, 10))  # большой зазор ниже
     name_above = _row(_w("Гистологическое исследование", 115, 60))
-    anchor = _row(_w("", 320, 66), _w("В08.1", 320, 66), _w("9330", 470, 66))
+    anchor = _row(_w("В08.1", 320, 66), _w("9330", 470, 66))  # имя пустое
     below = _row(_w("биопсийного материала", 115, 72))
     stitched = stitch_multiline([far, name_above, anchor, below], bounds, cmap)
     merged = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched if r.cells]
     assert merged == ["Гистологическое исследование биопсийного материала"]
-    # Преамбула осталась отдельной строкой, в имя не попала.
-    assert any(assign_to_columns(r, bounds)[cmap.name_idx] == "Прейскурант на медицинские услуги"
+    # Дальняя строка за зазором осталась отдельной, в имя не попала.
+    assert any(assign_to_columns(r, bounds)[cmap.name_idx] == "Цитологическое исследование мазка"
                for r in stitched if r.cells is None)
 
 
@@ -222,8 +224,8 @@ def test_stitch_stops_at_contract_preamble():
     stitched = stitch_multiline([pre1, pre2, name_above, anchor], bounds, cmap)
     merged = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched if r.cells]
     assert merged == ["Гистологическое исследование"]
-    assert _is_absorb_boundary(["Приложение № 1 от 01.01.2026"], cmap) is True
-    assert _is_absorb_boundary(["к договору на оказание услуг"], cmap) is True
+    assert _is_absorb_boundary(["Приложение № 1 от 01.01.2026"]) is True
+    assert _is_absorb_boundary(["к договору на оказание услуг"]) is True
 
 
 def test_stitch_stops_at_second_code_distinct_services():
@@ -314,14 +316,18 @@ def test_stitch_absorbs_allcaps_continuation_with_digits():
     assert name.endswith("иммуноблот")
 
 
-def test_stitch_does_not_steal_following_named_item():
-    # Целое название не тянет за собой первую строку следующей позиции.
+def test_stitch_empty_anchor_stops_at_next_service_when_name_complete():
+    # Пустой anchor добирает имя, и как только оно ЦЕЛОЕ, заглавная строка следующей
+    # услуги уже не тянется (проверяем именно разрыв по завершённости имени).
     bounds, cmap = _k3_bounds_cmap()
-    anchor = _row(_w("Удаление атеромы (полное)", 115, 40), _w("100000", 470, 40))
-    next_name = _row(_w("Краевая резекция ногтевой пластины", 115, 52))
-    next_anchor = _row(_w("кровь с ЭДТА", 390, 64), _w("25000", 470, 64))
-    stitched = stitch_multiline([anchor, next_name, next_anchor], bounds, cmap)
+    anchor = _row(_w("кровь с ЭДТА", 390, 40), _w("100000", 470, 40))
+    name1 = _row(_w("Удаление атеромы (полное)", 115, 47))
+    next_name = _row(_w("Краевая резекция ногтевой пластины", 115, 54))
+    next_anchor = _row(_w("кровь с ЭДТА", 390, 61), _w("25000", 470, 61))
+    stitched = stitch_multiline([anchor, name1, next_name, next_anchor], bounds, cmap)
     assert assign_to_columns(stitched[0], bounds)[cmap.name_idx] == "Удаление атеромы (полное)"
+    names = [assign_to_columns(r, bounds)[cmap.name_idx] for r in stitched]
+    assert "Краевая резекция ногтевой пластины" in names
 
 
 def test_stitch_is_noop_when_name_present():
@@ -383,3 +389,89 @@ def test_stitch_preserves_both_prices_when_assembling_name():
     assert cells[cmap.name_idx] == "Общий анализ крови (ОАК без СОЭ)"
     assert cells[4] == "880"
     assert cells[5] == "1410"
+
+
+def test_stitch_upward_stops_at_own_code_above():
+    # T2: если у строки выше СВОЙ код — это отдельная услуга, вверх не тянем.
+    bounds, cmap = _k3_bounds_cmap()
+    prev = _row(_w("Предыдущая услуга", 115, 40), _w("В01.1", 320, 40))
+    anchor = _row(_w("6", 115, 47), _w("В02.2", 320, 47), _w("880", 470, 47))
+    cmap2 = ColumnMap(name_idx=1, code_idx=2, price_idxs=[4], name_has_index=True)
+    stitched = stitch_multiline([prev, anchor], bounds, cmap2)
+    # «6» с кодом В02.2 не должен слиться с «Предыдущая услуга» (код В01.1).
+    names = [assign_to_columns(r, bounds)[cmap2.name_idx] for r in stitched]
+    assert "Предыдущая услуга" in names
+
+
+def test_analyze_table_then_stitch_pipeline():
+    # T3: интеграция analyze_table -> stitch_multiline. Несколько обычных строк
+    # задают плотность колонок, затем пустая ценовая строка добирает имя и код
+    # со строки ниже (геометрия Клиники 3).
+    rows = [_row(_w("Наименование", 100, 0), _w("Код", 320, 0), _w("Цена", 470, 0))]
+    for k, (nm, cd, pr) in enumerate(
+        [("Глюкоза", "В03.1", "1200"), ("Холестерин", "В03.2", "1300"),
+         ("Креатинин", "В03.3", "1400")]
+    ):
+        rows.append(_row(_w(nm, 100, 20 + 12 * k), _w(cd, 320, 20 + 12 * k), _w(pr, 470, 20 + 12 * k)))
+    rows.append(_row(_w("880", 470, 70)))  # пустая ценовая строка
+    rows.append(_row(_w("Общий анализ крови", 100, 77), _w("В02.110", 320, 77)))
+    bounds, cmap, header_idx = analyze_table(rows)
+    stitched = stitch_multiline(rows[header_idx + 1:], bounds, cmap)
+    merged = [assign_to_columns(r, bounds) for r in stitched if r.cells]
+    assert cmap.code_idx is not None
+    assert any(
+        m[cmap.name_idx] == "Общий анализ крови" and m[cmap.code_idx] == "В02.110"
+        for m in merged
+    )
+
+
+def test_is_section_heading_rejects_abbreviation_list():
+    # EH-1: список аббревиатур это продолжение названия панели, не заголовок.
+    assert _is_section_heading(["АЛАТ АСАТ ГГТ ЩФ"]) is False
+    assert _is_section_heading(["BRCA ATM CHEK PALB"]) is False
+    # Настоящий заголовок (есть длинное слово) по-прежнему ловится.
+    assert _is_section_heading(["ГОРМОНЫ"]) is True
+    assert _is_section_heading(["ИММУНОГЕМАТОЛОГИЧЕСКИЕ ИССЛЕДОВАНИЯ"]) is True
+
+
+def test_is_document_preamble():
+    assert _is_document_preamble("Приложение № 1 от 01.01.2026") is True
+    assert _is_document_preamble("к договору на оказание медицинских услуг") is True
+    assert _is_document_preamble("Общий анализ крови") is False
+
+
+def test_strip_leading_enumeration_keeps_quantity_unit():
+    # EH-4: количество перед единицей не номер строки — не срезаем.
+    assert strip_leading_enumeration("2 канала корневой пломбировки") == "2 канала корневой пломбировки"
+    assert strip_leading_enumeration("3 зоны лазерной эпиляции") == "3 зоны лазерной эпиляции"
+    # Номер строки перед названием по-прежнему срезаем.
+    assert strip_leading_enumeration("9 Выездная консультация врача") == "Выездная консультация врача"
+
+
+def test_looks_like_price_leading_large_number_with_description():
+    # T7: цена с описанием в одной ячейке («5000 тг аппарат»), но не номер строки.
+    assert _looks_like_price("5000 тг аппарат Тонзилор") is True
+    assert _looks_like_price("9 Выездная консультация врача") is False
+
+
+def test_is_index_sequence_rejects_small_constant():
+    # C2-nit: постоянная мелкая колонка [2,2,2] это не сквозная нумерация.
+    assert _is_index_sequence([2, 2, 2, 2]) is False
+
+
+def test_stitch_early_returns_without_price_or_name():
+    # T4-nit: без колонки имени или цены склейка ничего не делает.
+    bounds, _ = _k3_bounds_cmap()
+    rows = [_row(_w("Текст", 115, 40))]
+    no_name = ColumnMap(name_idx=None, price_idxs=[4])
+    no_price = ColumnMap(name_idx=1, price_idxs=[])
+    assert stitch_multiline(rows, bounds, no_name) is rows
+    assert stitch_multiline(rows, bounds, no_price) is rows
+
+
+def test_line_gap_limit_empty_fallback():
+    # T6-nit: без слов берём дефолтный порог, а не падаем.
+    assert _line_gap_limit([]) == 16.0
+    assert _line_gap_limit([Row(words=[], top=0.0)]) == 16.0
+    # С реальными словами порог = 2.2 высоты строки (>= пол).
+    assert _line_gap_limit([_row(_w("Анализ", 0, 0))]) == max(10 * 2.2, 12.0)

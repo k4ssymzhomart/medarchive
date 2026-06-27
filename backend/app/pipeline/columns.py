@@ -197,10 +197,11 @@ def _is_index_sequence(values: list) -> bool:
         ints.append(int(f))
     if len(ints) < 3:
         return False
-    # Шаг нумерации: инкремент на 1 либо сброс к малому значению (новый раздел).
-    # Постоянную колонку (одинаковые цены) индексом НЕ считаем — нет прогресса.
+    # Шаг нумерации: инкремент на 1 либо сброс ВНИЗ к малому значению (новый
+    # раздел). Постоянную колонку ([2,2,2], одинаковые цены) индексом НЕ считаем —
+    # в ней нет прогресса.
     enum_steps = sum(
-        1 for a, b in zip(ints, ints[1:]) if b == a + 1 or (1 <= b <= 3 and b <= a)
+        1 for a, b in zip(ints, ints[1:]) if b == a + 1 or (1 <= b <= 3 and b < a)
     )
     return enum_steps / (len(ints) - 1) > 0.7
 
@@ -267,6 +268,10 @@ def infer_column_map(rows: list[Row], bounds: list[float], sample: int = 250) ->
     alpha_len = [0] * n
     code_like = [0] * n
     values: list[list] = [[] for _ in range(n)]
+    # «Мягкий» учёт: любая ячейка с распарсенным числом. Нужен как запасной путь
+    # для вырожденных прайсов, где имя и цена слиты в одну ячейку (Клиника 5).
+    numeric_loose = [0] * n
+    values_loose: list[list] = [[] for _ in range(n)]
     for r in rows[:sample]:
         cells = assign_to_columns(r, bounds)
         for i in range(min(n, len(cells))):
@@ -274,13 +279,17 @@ def infer_column_map(rows: list[Row], bounds: list[float], sample: int = 250) ->
             if not t:
                 continue
             counts[i] += 1
+            amount = _parse_amount(t)
             if _looks_like_code(t):
                 code_like[i] += 1  # код важнее: «U1.7» это код, не цена
             elif _looks_like_price(t):
                 numeric[i] += 1
-                values[i].append(_parse_amount(t))
+                values[i].append(amount)
             else:
                 alpha_len[i] += sum(ch.isalpha() for ch in t)
+            if amount is not None:
+                numeric_loose[i] += 1
+                values_loose[i].append(amount)
 
     # Цена: колонка с большой долей чисел, не являющаяся сквозным номером строки.
     price_idxs = []
@@ -290,6 +299,15 @@ def infer_column_map(rows: list[Row], bounds: list[float], sample: int = 250) ->
         if _is_index_sequence(values[i]):
             continue
         price_idxs.append(i)
+    # Запасной путь: ни одна колонка не прошла строгий тест цены (имя и цена слиты,
+    # Клиника 5). Берём по мягкому тесту, чтобы не потерять страницу целиком.
+    if not price_idxs:
+        for i in range(n):
+            if not counts[i] or numeric_loose[i] / counts[i] <= 0.5:
+                continue
+            if _is_index_sequence(values_loose[i]):
+                continue
+            price_idxs.append(i)
 
     name_idx, best = None, -1
     for i in range(n):
@@ -390,14 +408,26 @@ def map_columns(header_cells: list[str]) -> ColumnMap:
 
 # Ведущий номер строки в колонке названия: «9 Выездная консультация врача».
 _LEADING_INDEX_RE = re.compile(r"^\s*\d{1,3}[.)]?\s+(?=\D)")
+# Единицы количества: «2 канала», «3 зоны» — число это часть названия, не номер.
+_QUANTITY_UNITS = (
+    "канал", "зон", "сеанс", "фракц", "проекц", "сустав", "сегмент",
+    "поле", "точк", "зуб", "ед.", "шт", "штук",
+)
 
 
 def strip_leading_enumeration(name: str) -> str:
     """Срезает ведущий номер строки у названия, когда колонка «№» слилась с
     названием (ColumnMap.name_has_index). «9 Выездная консультация врача» ->
-    «Выездная консультация врача». Требуем пробел и нецифру после номера,
-    чтобы не трогать настоящие названия вроде «3D реконструкция»."""
-    return _LEADING_INDEX_RE.sub("", name, count=1).strip() or name
+    «Выездная консультация врача». Требуем пробел и нецифру после номера, чтобы не
+    трогать «3D реконструкция»; не трогаем количество перед единицей («2 канала»)."""
+    match = _LEADING_INDEX_RE.match(name)
+    if not match:
+        return name
+    rest = name[match.end():]
+    first_word = rest.split(maxsplit=1)[0].lower() if rest.split() else ""
+    if first_word.startswith(_QUANTITY_UNITS):
+        return name
+    return rest.strip() or name
 
 
 def _row_is_priced(cells: list[str], cmap: ColumnMap) -> bool:
@@ -436,6 +466,11 @@ def _is_section_heading(cells: list[str]) -> bool:
     letters = [c for c in text if c.isalpha()]
     if len(letters) < 5:
         return False
+    # Список аббревиатур («АЛАТ АСАТ ГГТ ЩФ», «BRCA ATM CHEK») это продолжение
+    # названия панели, а не заголовок: в нём нет ни одного длинного слова.
+    words = [w for w in text.split() if any(ch.isalpha() for ch in w)]
+    if len(words) > 1 and not any(len(w) >= 6 for w in words):
+        return False
     upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
     # Одно-двухсловный капсовый заголовок («ГОРМОНЫ») короче 12 символов тоже
     # заголовок, поэтому строгий капс ловим без ограничения длины.
@@ -444,17 +479,21 @@ def _is_section_heading(cells: list[str]) -> bool:
     return upper_ratio > 0.7 and len(text) >= 12
 
 
-def _is_absorb_boundary(cells: list[str], cmap: ColumnMap) -> bool:
-    """Граница склейки: заголовок раздела (капс), строка-раздел по ключевому слову
-    («подраздел 1.2 ...») или преамбула договора («Приложение № 1 ... к договору
-    ... от 01.01.2026»). Дальше этой строки название не тянем."""
-    if _is_section_heading(cells):
-        return True
-    text = " ".join(c for c in cells if c.strip()).strip()
+def _is_document_preamble(text: str) -> bool:
+    """Преамбула документа, а не услуга: «Приложение № 1 ... к договору ... от
+    01.01.2026». Такие строки не часть названия и не позиция прайса."""
     low = text.lower()
     if low.startswith(_SECTION_KEYWORDS) or "договор" in low:
         return True
     return bool(_CONTRACT_DATE_RE.search(text))
+
+
+def _is_absorb_boundary(cells: list[str]) -> bool:
+    """Граница склейки: заголовок раздела (капс), строка-раздел по ключевому слову
+    («подраздел 1.2 ...») или преамбула договора. Дальше неё название не тянем."""
+    if _is_section_heading(cells):
+        return True
+    return _is_document_preamble(" ".join(c for c in cells if c.strip()).strip())
 
 
 def _name_column_has_indices(
@@ -499,22 +538,6 @@ def _name_incomplete(name: str) -> bool:
     if n[-1] in "(,/":
         return True
     return n.count("(") > n.count(")")
-
-
-def _assembled_name(
-    members: list[int], cells_list: list[list[str]], cmap: ColumnMap, anchor: int
-) -> str:
-    """Название, собранное из колонки имени строк-членов (без голого номера)."""
-    parts: list[str] = []
-    for m in members:
-        cells = cells_list[m]
-        text = cells[cmap.name_idx].strip() if cmap.name_idx < len(cells) else ""
-        if not text:
-            continue
-        if m == anchor and cmap.name_has_index and _is_bare_index(text):
-            continue
-        parts.append(text)
-    return " ".join(parts)
 
 
 def _line_gap_limit(rows: list[Row]) -> float:
@@ -586,7 +609,7 @@ def stitch_multiline(
     n = len(data_rows)
     cells_list = [assign_to_columns(r, bounds) for r in data_rows]
     priced = [_row_is_priced(c, cmap) for c in cells_list]
-    boundary = [_is_absorb_boundary(c, cmap) for c in cells_list]
+    boundary = [_is_absorb_boundary(c) for c in cells_list]
     gap_limit = _line_gap_limit(data_rows)
     claimed = [False] * n
     members_of: dict[int, list[int]] = {}
@@ -639,7 +662,7 @@ def stitch_multiline(
             # Если имя ещё оборвано (незакрытая скобка), капсовый фрагмент это его
             # продолжение (список антител «PML, gp21,0, ...»), тянем дальше.
             if have_name and cand_name[:1].isupper():
-                sofar = _assembled_name(members, cells_list, cmap, i)
+                sofar = _merge_member_cells(members, cells_list, cmap, i)[cmap.name_idx]
                 if sofar and not _name_incomplete(sofar):
                     break
             members.append(j)
