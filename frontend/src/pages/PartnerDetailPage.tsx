@@ -314,7 +314,7 @@ export default function PartnerDetailPage() {
       {/* Навигация назад */}
       <div>
         <Link
-          to="/partners"
+          to="/app/partners"
           className="inline-flex items-center gap-1.5 text-sm text-neutral-500 transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
