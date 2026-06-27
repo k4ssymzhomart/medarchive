@@ -80,7 +80,107 @@ def reembed(_args: list[str]) -> None:
         db.close()
 
 
-COMMANDS = {"seed-reference": seed_reference, "ingest": ingest, "reembed": reembed}
+def embed_items(_args: list[str]) -> None:
+    """Пакетно греет эмбеддинги уникальных названий активных позиций (в ai_cache).
+
+    Делает дорогой шаг (эмбеддинги) одним пакетным вызовом на ~500 строк вместо
+    тысяч одиночных в каскаде. После этого rematch берёт их из кэша.
+    """
+    from sqlalchemy import select
+
+    from app.models import PriceItem
+    from app.normalization import embeddings as emb
+
+    db = SessionLocal()
+    try:
+        names = (
+            db.execute(
+                select(PriceItem.service_name_raw)
+                .where(PriceItem.is_active.is_(True))
+                .distinct()
+            )
+            .scalars()
+            .all()
+        )
+        names = [n for n in names if n and n.strip()]
+        print(f"Уникальных названий для эмбеддинга: {len(names)}")
+        batch, done = 500, 0
+        for i in range(0, len(names), batch):
+            emb.embed_batch(db, names[i : i + batch])
+            db.commit()
+            done += len(names[i : i + batch])
+            print(f"  ... {done}/{len(names)}", flush=True)
+        print("Эмбеддинги позиций пред-прогреты")
+    finally:
+        db.close()
+
+
+def rematch(args: list[str]) -> None:
+    """Перепрогон каскада по всем активным позициям С ЗАПИСЬЮ в price_items.
+
+    Так /stats и демо показывают реальное число, а не до-арбитражное. Печатает
+    два честных числа: авто % от всех и от адресуемого знаменателя (всего минус
+    позиции, по которым арбитр вынес «нет совпадения»). args[0] — лимит (dry-run).
+    """
+    from sqlalchemy import select
+
+    from app.models import PriceItem
+    from app.normalization import llm_arbiter
+    from app.normalization.cascade import MatchCascade
+    from app.normalization.match_service import apply_match
+
+    limit = int(args[0]) if args else None
+    db = SessionLocal()
+    try:
+        llm_arbiter.reset_usage()
+        cascade = MatchCascade(db)  # лексический индекс строится один раз
+        q = select(PriceItem).where(PriceItem.is_active.is_(True)).order_by(PriceItem.item_id)
+        if limit:
+            q = q.limit(limit)
+        items = list(db.execute(q).scalars().all())
+        total = len(items)
+        auto = review = arbiter_no = unmatched = 0
+        for i, item in enumerate(items, 1):
+            oc = cascade.match(item.service_name_raw, item.category, item.service_code_source)
+            apply_match(db, item, oc)
+            if oc.is_auto:
+                auto += 1
+            elif oc.service_id is not None:
+                review += 1
+            elif oc.arbiter_no:
+                arbiter_no += 1
+            else:
+                unmatched += 1
+            if i % 200 == 0:
+                db.commit()
+                print(f"  ... {i}/{total} авто={auto} арбитр_нет={arbiter_no}", flush=True)
+        db.commit()
+
+        addressable = total - arbiter_no
+        u = llm_arbiter.get_usage()
+        pct_all = (auto / total * 100) if total else 0.0
+        pct_addr = (auto / addressable * 100) if addressable else 0.0
+        print("=== РЕМАТЧ ИТОГ ===")
+        print(f"всего активных: {total}")
+        print(f"АВТО по всем позициям: {auto} = {pct_all:.2f}%")
+        print(f"адресуемый знаменатель (всего - арбитр_нет {arbiter_no}): {addressable}")
+        print(f"АВТО по адресуемому: {auto}/{addressable} = {pct_addr:.2f}%")
+        print(f"в ревью: {review} | неадресуемо (арбитр нет): {arbiter_no} | unmatched: {unmatched}")
+        print(
+            f"арбитр: вызовов {u['calls']}, токены вход {u['prompt_tokens']} "
+            f"выход {u['completion_tokens']}"
+        )
+    finally:
+        db.close()
+
+
+COMMANDS = {
+    "seed-reference": seed_reference,
+    "ingest": ingest,
+    "reembed": reembed,
+    "embed-items": embed_items,
+    "rematch": rematch,
+}
 
 
 def main() -> None:

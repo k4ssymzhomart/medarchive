@@ -35,14 +35,22 @@ def apply_match(db: Session, item: PriceItem, outcome: MatchOutcome) -> None:
     if outcome.note:
         item.verification_note = outcome.note
 
-    if outcome.service_id is not None and outcome.score >= settings.match_high_threshold:
+    if outcome.service_id is not None and (
+        outcome.arbiter_yes or outcome.score >= settings.match_high_threshold
+    ):
+        # Уверенный матч (код/exact/высокий score) ИЛИ положительный вердикт арбитра.
+        # Вердикт арбитра — слой точности, принимаем как авто (service_id проставлен).
         item.service_id = outcome.service_id
         item.needs_review = False
         item.is_verified = outcome.method in (MatchMethod.exact, MatchMethod.llm)
     elif outcome.service_id is not None:
-        # пограничный авто-выбор (например, LLM) — в ревью для подтверждения
+        # пограничный авто-выбор без вердикта арбитра — в ревью для подтверждения
         item.service_id = outcome.service_id
         item.needs_review = True
+    elif outcome.arbiter_no:
+        # Арбитр явно сказал "нет совпадения" — позиция неадресуема, не в ревью.
+        item.service_id = None
+        item.needs_review = False
     else:
         item.service_id = None
         item.needs_review = bool(outcome.candidates)  # есть кандидаты -> needs_review, иначе unmatched
