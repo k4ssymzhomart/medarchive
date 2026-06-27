@@ -61,6 +61,8 @@ def with_keys(monkeypatch):
     monkeypatch.setattr(emb.settings, "openai_api_key", "test-openai")
     monkeypatch.setattr(rr.settings, "cohere_api_key", "test-cohere")
     monkeypatch.setattr(arb.settings, "anthropic_api_key", "test-anthropic")
+    monkeypatch.delenv("LLM_ARBITER_MODEL", raising=False)
+    monkeypatch.delenv("LLM_ARBITER_PROVIDER", raising=False)
 
 
 # --------------------------- эмбеддинги ---------------------------
@@ -141,7 +143,47 @@ def test_arbitrate_http_error_returns_none(db, with_keys, monkeypatch):
 
 def test_arbitrate_no_key_returns_none(db, monkeypatch):
     monkeypatch.setattr(arb.settings, "anthropic_api_key", "")
+    monkeypatch.setattr(arb.settings, "openai_api_key", "")
+    monkeypatch.delenv("LLM_ARBITER_MODEL", raising=False)
     assert arb.arbitrate(db, "оак", "гематология", ["общий анализ крови"]) is None
+
+
+# --------------------- выбор дешёвой модели арбитра (issue #4) ---------------------
+
+
+def test_arbiter_prefers_anthropic_haiku(monkeypatch):
+    monkeypatch.setattr(arb.settings, "anthropic_api_key", "a")
+    monkeypatch.setattr(arb.settings, "openai_api_key", "o")
+    monkeypatch.delenv("LLM_ARBITER_MODEL", raising=False)
+    provider, model = arb._resolve_model()
+    assert provider == "anthropic"
+    assert "haiku" in model.lower()
+    assert "opus" not in model.lower()
+
+
+def test_arbiter_falls_back_to_openai_mini(monkeypatch):
+    monkeypatch.setattr(arb.settings, "anthropic_api_key", "")
+    monkeypatch.setattr(arb.settings, "openai_api_key", "o")
+    monkeypatch.delenv("LLM_ARBITER_MODEL", raising=False)
+    provider, model = arb._resolve_model()
+    assert provider == "openai"
+    assert model == "gpt-4o-mini"
+    assert "opus" not in model.lower()
+
+
+def test_arbiter_env_override(monkeypatch):
+    monkeypatch.setattr(arb.settings, "anthropic_api_key", "")
+    monkeypatch.setattr(arb.settings, "openai_api_key", "o")
+    monkeypatch.setenv("LLM_ARBITER_MODEL", "gpt-4o-mini")
+    provider, model = arb._resolve_model()
+    assert provider == "openai" and model == "gpt-4o-mini"
+
+
+def test_arbiter_no_key_resolves_none(monkeypatch):
+    monkeypatch.setattr(arb.settings, "anthropic_api_key", "")
+    monkeypatch.setattr(arb.settings, "openai_api_key", "")
+    monkeypatch.delenv("LLM_ARBITER_MODEL", raising=False)
+    assert arb._resolve_model() == (None, None)
 
 
 def test_arbitrate_success(db, with_keys, monkeypatch):
