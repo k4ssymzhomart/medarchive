@@ -14,6 +14,9 @@ UUID остаётся uuid.UUID, JSONB круглит как list/dict, enum'ы 
 
 get_db подменяется через app.dependency_overrides на сессию к SQLite —
 прод-код при этом не трогается.
+
+Помимо API-инфраструктуры здесь же живут фикстуры слоя валидации (db,
+make_item): они используют те же @compiles-регистрации и SQLite в памяти.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Generator
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -283,3 +287,64 @@ def seed(db_session):
         item_astana=item_astana.item_id,
     )
     return ids
+
+
+# --------------------------------------------------------------------------- #
+# Фикстуры слоя валидации (версионирование, дедупликация).
+# Используют те же @compiles-регистрации и SQLite в памяти. Своя сессия со
+# своим движком — изоляция от API-фикстур; модели импортируются лениво, после
+# регистрации компиляторов выше.
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def db() -> Generator[Session, None, None]:
+    """Изолированная SQLite-сессия в памяти с минимальной схемой версий."""
+    from app.models import Base, Partner, PriceItem
+
+    eng = create_engine("sqlite://", future=True)
+    Base.metadata.create_all(eng, tables=[Partner.__table__, PriceItem.__table__])
+    session_factory = sessionmaker(bind=eng, autoflush=False, future=True)
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
+        eng.dispose()
+
+
+@pytest.fixture()
+def make_item(db: Session):
+    """Фабрика PriceItem с разумными значениями по умолчанию.
+
+    Возвращает функцию: вызов добавляет позицию в сессию и делает flush,
+    чтобы у неё появился item_id для связей версионирования.
+    """
+    from app.models import PriceItem
+
+    def _make(
+        *,
+        partner_id: uuid.UUID,
+        service_id: uuid.UUID | None,
+        price: Decimal | int | str | None = Decimal("1000"),
+        effective_date: date | None = None,
+        is_active: bool = True,
+        price_field: str = "price_resident_kzt",
+        **kwargs,
+    ) -> PriceItem:
+        if price is not None and not isinstance(price, Decimal):
+            price = Decimal(str(price))
+        item = PriceItem(
+            item_id=uuid.uuid4(),
+            doc_id=uuid.uuid4(),
+            partner_id=partner_id,
+            service_id=service_id,
+            service_name_raw="Услуга",
+            effective_date=effective_date,
+            is_active=is_active,
+            **kwargs,
+        )
+        setattr(item, price_field, price)
+        db.add(item)
+        db.flush()
+        return item
+
+    return _make
