@@ -262,7 +262,7 @@ export default function PartnersPage() {
               <TR key={p.partner_id} className="hover:bg-neutral-50">
                 <TD>
                   <Link
-                    to={`/partners/${encodeURIComponent(p.partner_id)}`}
+                    to={`/app/partners/${encodeURIComponent(p.partner_id)}`}
                     className="flex items-center gap-2 font-medium text-ink hover:text-accent"
                   >
                     <Building2 className="h-4 w-4 shrink-0 text-neutral-400" />
@@ -289,7 +289,7 @@ export default function PartnersPage() {
                 </TD>
                 <TD className="text-right">
                   <Link
-                    to={`/partners/${encodeURIComponent(p.partner_id)}`}
+                    to={`/app/partners/${encodeURIComponent(p.partner_id)}`}
                     className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
                   >
                     Детали

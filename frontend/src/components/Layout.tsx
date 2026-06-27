@@ -2,7 +2,7 @@
 // Острые углы, белый фон, тонкие линии 1px, акцент только для активного пункта.
 
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import {
   Search,
   Building2,
@@ -22,24 +22,28 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Поиск", icon: Search, end: true },
-  { to: "/partners", label: "Партнёры", icon: Building2 },
-  { to: "/admin", label: "Загрузка", icon: Upload },
-  { to: "/verification", label: "Очередь верификации", icon: ListChecks },
-  { to: "/unmatched", label: "Несопоставленные", icon: Unlink },
-  { to: "/dashboard", label: "Дашборд", icon: LayoutDashboard },
+  { to: "/app", label: "Поиск", icon: Search, end: true },
+  { to: "/app/partners", label: "Партнёры", icon: Building2 },
+  { to: "/app/admin", label: "Загрузка", icon: Upload },
+  { to: "/app/verification", label: "Очередь верификации", icon: ListChecks },
+  { to: "/app/unmatched", label: "Несопоставленные", icon: Unlink },
+  { to: "/app/dashboard", label: "Дашборд", icon: LayoutDashboard },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-white text-ink">
       <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col border-r border-line bg-white">
-        <div className="flex h-16 items-center gap-2 border-b border-line px-5">
+        <Link
+          to="/"
+          className="flex h-16 items-center gap-2 border-b border-line px-5"
+          aria-label="MedPartners, на главную"
+        >
           <Activity className="h-5 w-5 text-accent" />
           <span className="text-base font-semibold tracking-tight">
             MedPartners
           </span>
-        </div>
+        </Link>
 
         <nav className="flex-1 overflow-y-auto p-3">
           <ul className="flex flex-col gap-1">
