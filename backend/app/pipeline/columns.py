@@ -11,6 +11,7 @@ pytesseract нормализуются к этому виду, поэтому м
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from app.pipeline.price_parser import parse_amount as _parse_amount
@@ -94,9 +95,16 @@ def cluster_columns(words: list[Word], min_gap: float = 18.0) -> list[float]:
 
 
 def assign_to_columns(row: Row, bounds: list[float]) -> list[str]:
-    """Раскладывает слова строки по колонкам, заданным границами bounds."""
+    """Раскладывает слова строки по колонкам, заданным границами bounds.
+
+    Слова упорядочены по (Y, X): для обычной строки все слова на одной высоте,
+    поэтому это эквивалентно сортировке по X. Но после склейки многострочного
+    названия (stitch_multiline) строка содержит слова с нескольких уровней Y —
+    сортировка по (Y, X) сохраняет порядок чтения сверху вниз, слева направо,
+    иначе слова разных строк перемешались бы по X внутри колонки.
+    """
     cells = ["" for _ in bounds]
-    for w in sorted(row.words, key=lambda w: w.x0):
+    for w in sorted(row.words, key=lambda w: (round(w.top), w.x0)):
         idx = 0
         for i, b in enumerate(bounds):
             if w.xmid >= b:
@@ -124,10 +132,24 @@ class ColumnMap:
     code_idx: int | None = None
     price_idxs: list[int] = field(default_factory=list)
     labels: dict[int, str] = field(default_factory=dict)  # idx -> исходная подпись
+    name_has_index: bool = False  # колонка названия совмещена с номером строки «№»
 
 
 # Метки колонки номера строки/кода — это не цена.
 _NUMBER_COLUMN_LABELS = {"№", "n", "#", "номер", "код", "шифр", "no"}
+
+# Валютные слова-хвосты цены: «5000 тенге», «9000 тг».
+_CURRENCY_WORD = re.compile(r"тенге|тг|kzt|руб|rub|usd|₸|\$", re.IGNORECASE)
+
+
+def _looks_like_price(text: str) -> bool:
+    """Ячейка это цена: парсится в число, а из букв остаётся только валюта или
+    короткий предлог («5000 тенге», «от 5000»). «9 Выездная консультация врача»
+    ценой НЕ считается — иначе колонка названий с ведущим номером уезжает в цены."""
+    if _parse_amount(text) is None:
+        return False
+    core = _CURRENCY_WORD.sub("", text)
+    return sum(ch.isalpha() for ch in core) <= 2
 
 
 def _looks_like_code(text: str) -> bool:
@@ -146,7 +168,12 @@ def _looks_like_code(text: str) -> bool:
 
 
 def _is_index_sequence(values: list) -> bool:
-    """Колонка похожа на сквозной номер строки (1,2,3...): мелкие целые по порядку."""
+    """Колонка похожа на сквозной номер строки, а не на цену.
+
+    Номер строки идёт целыми с шагом 1 и часто сбрасывается на 1 в начале
+    нового раздела (9, 10, 1, 2, 3, ...). Цены так себя почти не ведут, поэтому
+    считаем долю «шагов нумерации»: инкремент на 1, повтор или сброс к малому
+    значению. Высокая доля -> это нумерация, исключаем колонку из цен."""
     ints = []
     for v in values:
         try:
@@ -158,8 +185,12 @@ def _is_index_sequence(values: list) -> bool:
         ints.append(int(f))
     if len(ints) < 3:
         return False
-    increasing = sum(1 for a, b in zip(ints, ints[1:]) if b >= a)
-    return increasing / max(1, len(ints) - 1) > 0.8
+    enum_steps = sum(
+        1
+        for a, b in zip(ints, ints[1:])
+        if b == a + 1 or b == a or (b <= a and b <= 3)
+    )
+    return enum_steps / (len(ints) - 1) > 0.7
 
 
 def column_bounds_by_density(
@@ -231,12 +262,11 @@ def infer_column_map(rows: list[Row], bounds: list[float], sample: int = 250) ->
             if not t:
                 continue
             counts[i] += 1
-            amount = _parse_amount(t)
             if _looks_like_code(t):
                 code_like[i] += 1  # код важнее: «U1.7» это код, не цена
-            elif amount is not None:
+            elif _looks_like_price(t):
                 numeric[i] += 1
-                values[i].append(amount)
+                values[i].append(_parse_amount(t))
             else:
                 alpha_len[i] += sum(ch.isalpha() for ch in t)
 
@@ -302,11 +332,20 @@ def analyze_table(rows: list[Row]) -> tuple[list[float], ColumnMap, int]:
         code_idx = hcmap.code_idx if hcmap.code_idx is not None else content.code_idx
         if code_idx is None and number_cols:
             code_idx = min(number_cols)
+        name_idx = hcmap.name_idx if hcmap.name_idx is not None else content.name_idx
+        # Колонка «№» слилась с названием (нет зазора между номером и именем):
+        # такой «код» это сквозной номер строки, не код услуги. Снимаем его с
+        # роли кода и помечаем, что у названия есть ведущий номер для очистки.
+        name_has_index = False
+        if name_idx is not None and code_idx == name_idx:
+            name_has_index = True
+            code_idx = None
         cmap = ColumnMap(
-            name_idx=hcmap.name_idx if hcmap.name_idx is not None else content.name_idx,
+            name_idx=name_idx,
             code_idx=code_idx,
             price_idxs=price_idxs,
             labels=labels,
+            name_has_index=name_has_index,
         )
     else:
         cmap = content
@@ -329,3 +368,89 @@ def map_columns(header_cells: list[str]) -> ColumnMap:
             cmap.price_idxs.append(idx)
     # Фолбэк: если имя не нашли — берём самую широкую текстовую колонку (часто это name).
     return cmap
+
+
+# Ведущий номер строки в колонке названия: «9 Выездная консультация врача».
+_LEADING_INDEX_RE = re.compile(r"^\s*\d{1,3}[.)]?\s+(?=\D)")
+
+
+def strip_leading_enumeration(name: str) -> str:
+    """Срезает ведущий номер строки у названия, когда колонка «№» слилась с
+    названием (ColumnMap.name_has_index). «9 Выездная консультация врача» ->
+    «Выездная консультация врача». Требуем пробел и нецифру после номера,
+    чтобы не трогать настоящие названия вроде «3D реконструкция»."""
+    return _LEADING_INDEX_RE.sub("", name, count=1).strip() or name
+
+
+def _row_is_priced(cells: list[str], cmap: ColumnMap) -> bool:
+    """В строке есть распарсенная цена хотя бы в одной тарифной колонке."""
+    for idx in cmap.price_idxs:
+        if idx < len(cells) and _parse_amount(cells[idx]) is not None:
+            return True
+    return False
+
+
+def _is_section_heading(cells: list[str]) -> bool:
+    """Заголовок раздела внутри окна склейки: длинный текст, почти весь капсом
+    («ИММУНОГЕМАТОЛОГИЧЕСКИЕ ИССЛЕДОВАНИЯ»). Такой заголовок не часть названия —
+    на нём склейку останавливаем. Продолжения и сноски (начинаются со скобки,
+    дефиса или строчной буквы) заголовком НЕ считаем."""
+    text = " ".join(c for c in cells if c.strip()).strip()
+    if len(text) < 12 or text[0] in "(<[-—.,:;":
+        return False
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 5:
+        return False
+    upper = sum(1 for c in letters if c.isupper())
+    return upper / len(letters) > 0.7
+
+
+def stitch_multiline(
+    data_rows: list[Row], bounds: list[float], cmap: ColumnMap, max_absorb: int = 6
+) -> list[Row]:
+    """Склейка многострочных названий услуг (issue #1).
+
+    В части PDF (Клиника 3) одна логическая позиция разложена по нескольким
+    строкам Y: ценовая строка несёт биоматериал и цену, а само название (и код)
+    идут отдельными строками НИЖЕ. group_rows честно бьёт их по Y, из-за чего
+    название теряется, а в поле имени попадает биоматериал («кровь с ЭДТА»).
+
+    Здесь ценовая строка с ПУСТОЙ колонкой названия (anchor) поглощает
+    последующие строки без цены — их слова дописываются к anchor, пока не
+    встретится следующая ценовая строка или заголовок раздела. Слова разных
+    уровней Y корректно раскладываются по колонкам (assign_to_columns сортирует
+    по Y, X). Если у ценовой строки название уже есть — не трогаем (Клиника 4 и
+    штатные прайсы не задеваются, регрессий нет)."""
+    if cmap.name_idx is None or not cmap.price_idxs:
+        return data_rows
+
+    result: list[Row] = []
+    i, n = 0, len(data_rows)
+    while i < n:
+        row = data_rows[i]
+        cells = assign_to_columns(row, bounds)
+        if not _row_is_priced(cells, cmap):
+            result.append(row)
+            i += 1
+            continue
+        name_cell = cells[cmap.name_idx].strip() if cmap.name_idx < len(cells) else ""
+        if name_cell:
+            result.append(row)
+            i += 1
+            continue
+        # anchor без названия: поглощаем последующие строки-продолжения.
+        merged = Row(words=list(row.words), top=row.top)
+        absorbed = 0
+        j = i + 1
+        while j < n and absorbed < max_absorb:
+            nxt_cells = assign_to_columns(data_rows[j], bounds)
+            if _row_is_priced(nxt_cells, cmap):
+                break
+            if _is_section_heading(nxt_cells):
+                break
+            merged.words.extend(data_rows[j].words)
+            absorbed += 1
+            j += 1
+        result.append(merged)
+        i = j
+    return result

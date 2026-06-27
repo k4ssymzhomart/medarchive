@@ -26,6 +26,8 @@ from app.pipeline.columns import (
     analyze_table,
     assign_to_columns,
     group_rows,
+    stitch_multiline,
+    strip_leading_enumeration,
 )
 from app.pipeline.price_parser import parse_amount
 
@@ -77,6 +79,9 @@ class PdfTextExtractor(Extractor):
                         continue
 
                     data_rows = rows[header_idx + 1:] if header_idx >= 0 else rows
+                    # Склейка многострочных названий (issue #1): дозаполняет
+                    # пустую колонку имени продолжениями со строк без цены.
+                    data_rows = stitch_multiline(data_rows, bounds, cmap)
                     category = self._consume_rows(
                         data_rows, cmap, bounds, page_number, category, result
                     )
@@ -215,7 +220,8 @@ class PdfTextExtractor(Extractor):
         if cmap.name_idx is not None and cmap.name_idx < len(cells):
             explicit = cells[cmap.name_idx].strip()
             if explicit:
-                return explicit
+                # Колонка «№» слилась с названием — срезаем ведущий номер строки.
+                return strip_leading_enumeration(explicit) if cmap.name_has_index else explicit
         # Фолбэк: самая длинная ячейка, которая не код и не чистая цена.
         best = ""
         for idx, cell in enumerate(cells):
