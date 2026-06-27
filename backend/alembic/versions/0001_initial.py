@@ -43,11 +43,11 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS ix_partners_fts "
         "ON partners USING gin (to_tsvector('russian', coalesce(name,'') || ' ' || coalesce(city,'')))"
     )
-    # pgvector HNSW индекс на Service.embedding (косинус).
-    op.execute(
-        f"CREATE INDEX IF NOT EXISTS ix_services_embedding "
-        f"ON services USING hnsw (embedding vector_cosine_ops)"
-    )
+    # pgvector: ANN индекс (hnsw/ivfflat) поддерживает максимум 2000 измерений,
+    # а text-embedding-3-large даёт 3072. При справочнике ~1300 услуг точный
+    # KNN скан по косинусу занимает доли миллисекунды, поэтому ANN индекс не нужен.
+    # Если справочник вырастет на порядки, добавьте halfvec индекс
+    # (USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)) и каст в запросе.
 
 
 def downgrade() -> None:

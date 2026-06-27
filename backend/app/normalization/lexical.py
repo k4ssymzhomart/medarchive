@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Service
-from app.normalization.normalize import normalize
+from app.normalization.normalize import normalize, normalize_code
 
 
 @dataclass
@@ -32,25 +32,47 @@ class LexicalIndex:
         self.entries: list[LexEntry] = []
         self._exact: dict[str, LexEntry] = {}
         self._choices: list[str] = []
+        # Карта код тарификатора -> список услуг (82 кода неуникальны, поэтому список).
+        self._by_code: dict[str, list[LexEntry]] = {}
 
     @classmethod
     def from_db(cls, db: Session) -> LexicalIndex:
-        idx = cls()
         services = db.execute(select(Service).where(Service.is_active.is_(True))).scalars().all()
+        return cls.from_services(services)
+
+    @classmethod
+    def from_services(cls, services) -> LexicalIndex:
+        """Строит индекс из любого итерируемого с полями service_id, service_name,
+        synonyms, category, icd_code (БД или офлайн список для замера/тестов)."""
+        idx = cls()
         for svc in services:
-            names = [svc.service_name, *(svc.synonyms or [])]
+            names = [svc.service_name, *(getattr(svc, "synonyms", None) or [])]
             for nm in names:
                 norm = normalize(nm)
                 if not norm:
                     continue
-                entry = LexEntry(svc.service_id, svc.service_name, svc.category, norm)
+                entry = LexEntry(svc.service_id, svc.service_name, getattr(svc, "category", None), norm)
                 idx.entries.append(entry)
                 idx._exact.setdefault(norm, entry)
+            nc = normalize_code(getattr(svc, "icd_code", None))
+            if nc:
+                bucket = idx._by_code.setdefault(nc, [])
+                if all(e.service_id != svc.service_id for e in bucket):
+                    bucket.append(
+                        LexEntry(svc.service_id, svc.service_name, getattr(svc, "category", None), nc)
+                    )
         idx._choices = [e.normalized for e in idx.entries]
         return idx
 
     def exact(self, raw: str) -> LexEntry | None:
         return self._exact.get(normalize(raw))
+
+    def by_code(self, code: str | None) -> list[LexEntry]:
+        """Услуги справочника с данным кодом тарификатора (после нормализации)."""
+        nc = normalize_code(code)
+        if not nc:
+            return []
+        return list(self._by_code.get(nc, []))
 
     def search(self, raw: str, limit: int = 20, category: str | None = None):
         """Возвращает [(LexEntry, score 0..1)] по убыванию."""
