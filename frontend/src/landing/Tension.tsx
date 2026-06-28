@@ -45,7 +45,7 @@ export function Tension() {
         </h2>
         <p className="mt-8 max-w-xl text-lg leading-relaxed text-muted">
           Одна услуга у одной клиники называется десятком способов. Сравнить цены вручную
-          невозможно. MedPartners приводит этот хаос к единому справочнику.
+          невозможно. MedServicePrice приводит этот хаос к единому справочнику.
         </p>
       </div>
     </section>

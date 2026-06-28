@@ -1,4 +1,4 @@
-// Общие UI примитивы MedPartners.
+// Общие UI примитивы MedServicePrice.
 // Острые углы, монохром плюс один акцент, иконки строго lucide-react.
 
 import type {

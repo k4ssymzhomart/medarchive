@@ -1,4 +1,4 @@
-// Публичный лендинг MedPartners. Скролл-история по landing-page-craft.md.
+// Публичный лендинг MedServicePrice. Скролл-история по landing-page-craft.md.
 // Бит-лист: Hero (claim) -> Возможности (features) -> Проблема (tension) ->
 // Конвейер (подписной момент, pinned scrub) -> лента -> Доказательства (счётчики)
 // -> Заявление (пауза) -> CTA -> Футер. Lenis плавный скролл и MotionConfig только

@@ -65,7 +65,7 @@ export function CTA() {
               className="pointer-events-none absolute left-1/2 top-[-30%] h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-accent-light/30 blur-3xl"
             />
             <div className="relative mx-auto max-w-2xl">
-              <h2 className="text-h2 font-semibold text-paper">Попробуйте MedPartners</h2>
+              <h2 className="text-h2 font-semibold text-paper">Попробуйте MedServicePrice</h2>
               <p className="mt-3 text-lg text-paper/85">Запишитесь на демо сегодня</p>
               <div className="mt-8 flex justify-center">
                 <EmailCapture variant="onAccent" />

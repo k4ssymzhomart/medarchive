@@ -33,7 +33,7 @@ export function Nav() {
       >
         <a
           href="#top"
-          aria-label="MedPartners, наверх"
+          aria-label="MedServicePrice, наверх"
           className={[
             "overflow-hidden transition-all duration-300 ease-out2",
             scrolled ? "max-w-0 opacity-0" : "max-w-[240px] opacity-100",

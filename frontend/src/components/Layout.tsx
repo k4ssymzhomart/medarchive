@@ -10,7 +10,6 @@ import {
   ListChecks,
   Unlink,
   LayoutDashboard,
-  Activity,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -36,13 +35,15 @@ export function Layout({ children }: { children: ReactNode }) {
       <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col border-r border-line bg-white">
         <Link
           to="/"
-          className="flex h-16 items-center gap-2 border-b border-line px-5"
-          aria-label="MedPartners, на главную"
+          className="flex h-16 items-center border-b border-line px-5"
+          aria-label="MedServicePrice, на главную"
         >
-          <Activity className="h-5 w-5 text-accent" />
-          <span className="text-base font-semibold tracking-tight">
-            MedPartners
-          </span>
+          <img
+            src="/logo.png"
+            alt="MedServicePrice"
+            draggable={false}
+            className="h-7 w-auto select-none"
+          />
         </Link>
 
         <nav className="flex-1 overflow-y-auto p-3">

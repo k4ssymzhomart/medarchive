@@ -1,4 +1,4 @@
-# Сборка фронтенда MedPartners и раздача через nginx.
+# Сборка фронтенда MedServicePrice и раздача через nginx.
 
 FROM node:20-alpine AS build
 WORKDIR /app

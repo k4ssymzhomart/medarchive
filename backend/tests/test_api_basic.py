@@ -14,7 +14,7 @@ def test_app_opens_root(client):
     resp = client.get("/")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["name"] == "MedPartners API"
+    assert body["name"] == "MedServicePrice API"
     assert body["version"] == __version__
     assert body["openapi"] == "/openapi.json"
 
@@ -36,7 +36,7 @@ def test_openapi_schema_valid(client):
     assert resp.status_code == 200
     schema = resp.json()
     assert schema["openapi"].startswith("3.")
-    assert schema["info"]["title"] == "MedPartners API"
+    assert schema["info"]["title"] == "MedServicePrice API"
     assert schema["info"]["version"] == __version__
     assert "paths" in schema and schema["paths"]
 

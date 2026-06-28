@@ -50,7 +50,7 @@ export function SiteFooter() {
           ))}
         </div>
         <div className="mt-16 flex flex-col gap-4 border-t border-surface-line pt-8 text-sm text-muted md:flex-row md:items-center md:justify-between">
-          <span>Все права защищены © 2026 MedPartners</span>
+          <span>Все права защищены © 2026 MedServicePrice</span>
           <a href="#top" className="transition-colors duration-200 hover:text-paper">
             Наверх
           </a>

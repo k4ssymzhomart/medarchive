@@ -1,4 +1,4 @@
-// Типизированный клиент API MedPartners.
+// Типизированный клиент API MedServicePrice.
 // База берётся из VITE_API_URL, иначе прокси "/api" (см. vite.config.ts / nginx.conf).
 
 const BASE = (import.meta.env.VITE_API_URL as string) || "/api";

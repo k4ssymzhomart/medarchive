@@ -1,4 +1,4 @@
-// Маршрутизация MedPartners v2.
+// Маршрутизация MedServicePrice v2.
 // `/` — публичный лендинг. `/app/*` — продукт (существующие экраны под Layout).
 
 import { Suspense, lazy } from "react";

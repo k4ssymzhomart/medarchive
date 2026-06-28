@@ -10,7 +10,7 @@ from app.api import api_router
 from app.config import settings
 
 app = FastAPI(
-    title="MedPartners API",
+    title="MedServicePrice API",
     version=__version__,
     description=(
         "Конвейер доверия к данным прайсов клиник. Каждая цифра имеет "
@@ -40,7 +40,7 @@ def health() -> dict:
 @app.get("/", tags=["system"])
 def root() -> dict:
     return {
-        "name": "MedPartners API",
+        "name": "MedServicePrice API",
         "version": __version__,
         "docs": "/docs",
         "openapi": "/openapi.json",

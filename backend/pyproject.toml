@@ -1,7 +1,7 @@
 [project]
 name = "medpartners-backend"
 version = "1.0.0"
-description = "MedPartners. Конвейер доверия к данным прайсов клиник."
+description = "MedServicePrice. Конвейер доверия к данным прайсов клиник."
 requires-python = ">=3.11"
 
 [tool.ruff]

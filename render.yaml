@@ -1,4 +1,4 @@
-# MedPartners на Render (Blueprint, FREE-вариант).
+# MedServicePrice на Render (Blueprint, FREE-вариант).
 # Все сервисы на бесплатном тарифе: Postgres (free), бэкенд (web, free),
 # фронтенд (static, free). Без воркера и без Redis: для демо на восстановленном
 # дампе БД они не нужны.

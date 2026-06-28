@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 
-// MedPartners frontend dev config.
+// MedServicePrice frontend dev config.
 // Proxy /api -> backend at :8000, stripping the /api prefix.
 export default defineConfig({
   plugins: [react()],

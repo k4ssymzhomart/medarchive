@@ -1,4 +1,4 @@
-# Деплой MedPartners на Render
+# Деплой MedServicePrice на Render
 
 Быстрый путь для демо. Поднимает: **Postgres (pgvector)** + **бэкенд** (FastAPI,
 конвейер нормализации, Docker) + **фронтенд** (лендинг `/` и продукт `/app`,
