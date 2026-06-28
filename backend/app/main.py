@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api import api_router
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+if not settings.operator_token:
+    # Заметный сигнал в логах: иначе случайный деплой без OPERATOR_TOKEN тихо
+    # оставит админские эндпоинты (загрузка, сопоставление, очереди) открытыми.
+    logger.warning(
+        "OPERATOR_TOKEN не задан — админские эндпоинты ОТКРЫТЫ. "
+        "Задайте OPERATOR_TOKEN, чтобы закрыть админку."
+    )
 
 app = FastAPI(
     title="MedServicePrice API",

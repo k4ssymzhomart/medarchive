@@ -3,6 +3,12 @@
 
 const BASE = (import.meta.env.VITE_API_URL as string) || "/api";
 
+// Операторский токен для админских эндпоинтов (загрузка, сопоставление, очереди).
+// Пусто -> заголовок не шлётся (открытый dev-контур). Значение вшивается в сборку
+// (VITE_*), поэтому это НЕ секрет, а токен демо-оператора: deter casual access, но
+// он публичен в бандле. Шлём на все запросы; на публичных роутах бэкенд игнорирует.
+const OPERATOR_TOKEN = (import.meta.env.VITE_OPERATOR_TOKEN as string) || "";
+
 // --- Общие типы ---
 
 export interface Page {
@@ -257,12 +263,16 @@ function buildQuery(params: object | undefined): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (!(init?.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (OPERATOR_TOKEN) {
+    headers.Authorization = `Bearer ${OPERATOR_TOKEN}`;
+  }
   const res = await fetch(`${BASE}${path}`, {
-    headers:
-      init?.body instanceof FormData
-        ? undefined
-        : { "Content-Type": "application/json" },
     ...init,
+    headers: { ...headers, ...((init?.headers as Record<string, string>) ?? {}) },
   });
   if (!res.ok) {
     let detail = "";
