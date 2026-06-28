@@ -40,10 +40,18 @@ class MatchOutcome:
     method: MatchMethod = MatchMethod.none
     candidates: list[Candidate] = field(default_factory=list)
     note: str | None = None
+    # Арбитр явно ВЫБРАЛ кандидата ("да") — это авто-матч, не ручная очередь.
+    arbiter_yes: bool = False
+    # Арбитр явно сказал "нет совпадения" — позиция неадресуема (вне знаменателя).
+    arbiter_no: bool = False
 
     @property
     def is_auto(self) -> bool:
-        return self.service_id is not None and self.score >= settings.match_high_threshold
+        # Авто, если уверенный детерминированный/лексический матч ИЛИ положительный
+        # вердикт арбитра. Вердикт арбитра — это слой ТОЧНОСТИ, ему доверяем как авто.
+        if self.service_id is None:
+            return False
+        return self.arbiter_yes or self.score >= settings.match_high_threshold
 
 
 class MatchCascade:
@@ -52,7 +60,8 @@ class MatchCascade:
         self.lexical = lexical or LexicalIndex.from_db(db)
 
     # --- уровень 3: семантический поиск в pgvector ---
-    def _semantic(self, raw: str, top_k: int = 20) -> list[Candidate]:
+    def _semantic(self, raw: str, top_k: int | None = None) -> list[Candidate]:
+        top_k = top_k or settings.embed_top_k
         # Задача C: НЕ фильтруем по категории. Таксономия справочника
         # (специальность) и раздела прайса разные, жёсткое равенство убивает recall.
         vector = emb.embed_text(self.db, raw)
@@ -98,7 +107,10 @@ class MatchCascade:
             best_h.service_id, best_h.service_name, max(0.95, best_sc), MatchMethod.code, candidates
         )
 
-    def match(self, raw: str, category: str | None = None, code: str | None = None) -> MatchOutcome:
+    def match(
+        self, raw: str, category: str | None = None, code: str | None = None,
+        use_arbiter: bool = True,
+    ) -> MatchOutcome:
         # Уровень 0: детерминированный матч по коду тарификатора (Задача B).
         # Самый надёжный путь, без AI. Идёт ПЕРЕД текстовым каскадом.
         nc = normalize_code(code)
@@ -128,8 +140,8 @@ class MatchCascade:
             best = lex_cands[0]
             return MatchOutcome(best.service_id, best.service_name, best.score, MatchMethod.fuzzy, lex_cands)
 
-        # Уровень 3: семантический (эмбеддинги).
-        sem_cands = self._semantic(raw)
+        # Уровень 3: семантический (эмбеддинги). Можно выключить на ingest.
+        sem_cands = self._semantic(raw) if settings.ai_matching_enabled else []
 
         # Слияние кандидатов лексики и семантики (берём максимум score по сервису).
         merged: dict[uuid.UUID, Candidate] = {}
@@ -137,7 +149,9 @@ class MatchCascade:
             cur = merged.get(c.service_id)
             if cur is None or c.score > cur.score:
                 merged[c.service_id] = c
-        candidates = sorted(merged.values(), key=lambda c: c.score, reverse=True)[:20]
+        candidates = sorted(merged.values(), key=lambda c: c.score, reverse=True)[
+            : settings.candidate_pool
+        ]
         for i, c in enumerate(candidates):
             c.rank = i
 
@@ -163,24 +177,25 @@ class MatchCascade:
         if best.score >= settings.match_high_threshold:
             return MatchOutcome(best.service_id, best.service_name, best.score, best.method, candidates)
 
-        # Уровень 5: LLM арбитр для пограничной зоны.
-        if settings.match_low_threshold <= best.score < settings.match_high_threshold:
-            top3 = candidates[:3]
-            verdict = arbitrate(self.db, raw, category, [c.service_name for c in top3])
+        # Уровень 5: LLM арбитр по ВСЕЙ полосе [match_low, match_high).
+        # Полоса опущена до 0.40 — арбитр судит корректность кандидата, поэтому
+        # точность держится; его "да" = авто-матч, "нет" = неадресуемо.
+        if use_arbiter and settings.match_low_threshold <= best.score < settings.match_high_threshold:
+            topn = candidates[: settings.arbiter_candidates]
+            verdict = arbitrate(self.db, raw, category, [c.service_name for c in topn])
             if verdict:
                 choice = int(verdict.get("choice", 0))
                 conf = float(verdict.get("confidence", 0.0))
                 reason = verdict.get("reason")
-                if 1 <= choice <= len(top3):
-                    chosen = top3[choice - 1]
-                    score = max(chosen.score, conf)
+                if 1 <= choice <= len(topn):
+                    chosen = topn[choice - 1]
                     return MatchOutcome(
-                        chosen.service_id, chosen.service_name, score,
-                        MatchMethod.llm, candidates, note=reason,
+                        chosen.service_id, chosen.service_name, max(chosen.score, conf),
+                        MatchMethod.llm, candidates, note=reason, arbiter_yes=True,
                     )
                 return MatchOutcome(
                     None, None, best.score, MatchMethod.none, candidates,
-                    note=reason or "LLM: совпадения нет",
+                    note=reason or "Арбитр: совпадения в справочнике нет", arbiter_no=True,
                 )
 
         # Пограничная/низкая зона без авторешения -> возвращаем кандидатов для ревью.
