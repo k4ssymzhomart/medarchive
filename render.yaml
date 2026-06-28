@@ -1,0 +1,72 @@
+# MedPartners на Render (Blueprint).
+# Деплой: Render Dashboard -> New -> Blueprint -> подключить этот репозиторий.
+# Render прочитает этот файл и создаст: Postgres (pgvector), бэкенд (Docker web),
+# фронтенд (static site). Секретные ключи (sync: false) задаются в дашборде.
+#
+# ВАЖНО про URL: Render даёт сервисам адреса вида https://<имя>.onrender.com.
+# Если имена ниже свободны — URL предсказуемы. Если Render добавит суффикс,
+# обнови VITE_API_URL (фронт) и API_CORS_ORIGINS (бэк) на фактические адреса.
+
+databases:
+  - name: medpartners-db
+    databaseName: medpartners
+    user: medpartners
+    plan: free
+    postgresMajorVersion: "16"
+    # pgvector создаётся миграцией (CREATE EXTENSION IF NOT EXISTS vector) —
+    # managed Postgres на Render это поддерживает.
+
+services:
+  # --- Бэкенд: FastAPI + конвейер нормализации (Docker) ---
+  - type: web
+    name: medpartners-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    plan: starter            # free тоже работает; starter стабильнее для OCR/LibreOffice
+    region: frankfurt        # ближе к KZ/демо; можно oregon
+    healthCheckPath: /health
+    # Миграции + сид справочника один раз на деплой (идемпотентно).
+    preDeployCommand: "alembic upgrade head && python -m app.cli seed-reference 'Справочник услуг.xlsx'"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: medpartners-db
+          property: connectionString
+      - key: API_CORS_ORIGINS
+        value: https://medpartners-frontend.onrender.com
+      - key: STORAGE_BACKEND
+        value: local
+      - key: STORAGE_LOCAL_DIR
+        value: /data/storage
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Дешёвая модель арбитра нормализации.
+      - key: LLM_ARBITER_MODEL
+        value: gpt-4o-mini
+      # --- Ключи (задать в дашборде, в репозиторий НЕ коммитятся) ---
+      # Все опциональны: без них работают код-матч + точное + fuzzy + FTS-поиск;
+      # с OPENAI включаются эмбеддинги и арбитр (семантическая нормализация).
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # --- Фронтенд: лендинг (/) + продукт (/app) как статический сайт ---
+  - type: web
+    name: medpartners-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # База API на этапе сборки. Должна указывать на бэкенд выше.
+      - key: VITE_API_URL
+        value: https://medpartners-backend.onrender.com
+    routes:
+      # SPA: любые маршруты отдаём index.html (React Router).
+      - type: rewrite
+        source: /*
+        destination: /index.html

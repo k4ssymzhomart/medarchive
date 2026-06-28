@@ -1,0 +1,35 @@
+# Render-образ бэкенда MedPartners.
+# Отличие от backend/Dockerfile: контекст сборки = КОРЕНЬ репозитория, чтобы
+# запечь в образ справочник и реальный архив прайсов. На Render нет volume-
+# монтирования из репозитория (в compose они монтировались), поэтому файлы,
+# нужные для seed-reference и ingest, кладём прямо в образ.
+
+FROM python:3.12-slim
+
+# Системные зависимости: Tesseract (rus) для битых сканов, poppler для рендера
+# PDF, LibreOffice для конвертации .xls.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-rus \
+    tesseract-ocr-eng \
+    poppler-utils \
+    libreoffice-calc \
+    libgl1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ /app/
+# Справочник услуг (для seed-reference) и реальный архив 10 прайсов (для ingest).
+COPY ["Справочник услуг.xlsx", "/app/Справочник услуг.xlsx"]
+COPY docs/ /app/docs/
+
+EXPOSE 8000
+
+# Render задаёт переменную $PORT. Миграции и сид справочника выполняются в
+# preDeployCommand (см. render.yaml), поэтому здесь только запуск API.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

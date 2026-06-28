@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,20 @@ class Settings(BaseSettings):
 
     # --- DB ---
     database_url: str = "postgresql+psycopg://medpartners:medpartners@localhost:5432/medpartners"
+
+    @field_validator("database_url")
+    @classmethod
+    def _ensure_psycopg_driver(cls, v: str) -> str:
+        """Облачные провайдеры (Render, Heroku) дают URL вида postgres:// или
+        postgresql:// — у нас драйвер psycopg3. Приводим схему, чтобы строка из
+        окружения работала без правок."""
+        if v.startswith("postgresql+"):
+            return v
+        if v.startswith("postgresql://"):
+            return "postgresql+psycopg://" + v[len("postgresql://"):]
+        if v.startswith("postgres://"):
+            return "postgresql+psycopg://" + v[len("postgres://"):]
+        return v
 
     # --- Celery / Redis ---
     redis_url: str = "redis://localhost:6379/0"
