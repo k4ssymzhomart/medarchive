@@ -40,13 +40,10 @@ services:
     plan: free               # 512 МБ RAM; для отдачи API на восстановленном дампе достаточно
     region: frankfurt        # ближе к KZ; при желании oregon
     healthCheckPath: /health
-    # На free нет preDeployCommand, поэтому миграции и сид справочника кладём в
-    # команду запуска. Идемпотентно: alembic не двигает уже накатанную схему,
-    # seed-reference делает upsert. $PORT задаёт Render.
-    dockerCommand: >-
-      sh -c "alembic upgrade head &&
-      python -m app.cli seed-reference 'Справочник услуг.xlsx' &&
-      uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # На free нет preDeployCommand. Миграции + сид справочника + uvicorn зашиты в
+    # образ (Dockerfile.render -> /app/start.sh, родной Docker CMD). dockerCommand
+    # здесь НЕ задаём намеренно: Render ненадёжно парсит цепочки через && и вся
+    # строка уходила в одну команду (-> exit 127, "not found"). Шаги идемпотентны.
     envVars:
       - key: DATABASE_URL
         fromDatabase:

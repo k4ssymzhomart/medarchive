@@ -30,6 +30,9 @@ COPY docs/ /app/docs/
 
 EXPOSE 8000
 
-# Render задаёт переменную $PORT. Миграции и сид справочника выполняются в
-# preDeployCommand (см. render.yaml), поэтому здесь только запуск API.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Старт через скрипт в образе: миграции + сид справочника + uvicorn.
+# Цепочку команд держим в start.sh, а НЕ в render.yaml dockerCommand — Render
+# ненадёжно парсит цепочки через && (вся строка уходит в одну команду -> 127).
+# Скрипт запускается родным Docker CMD, поэтому парсинг Render не участвует.
+RUN chmod +x /app/start.sh
+CMD ["sh", "/app/start.sh"]
