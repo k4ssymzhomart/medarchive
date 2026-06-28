@@ -7,6 +7,17 @@
 
 Архитектура и стратегия описаны в [PHASE_1_STRATEGY_AND_ARCHITECTURE.md](PHASE_1_STRATEGY_AND_ARCHITECTURE.md).
 
+## Живой URL
+
+Деплой на Render одним Blueprint (см. раздел «Деплой на Render»). После Apply:
+
+- Лендинг: `https://medpartners-frontend.onrender.com/`
+- Продукт: `https://medpartners-frontend.onrender.com/app`
+- API и Swagger: `https://medpartners-backend.onrender.com/docs`
+- Метрики: `https://medpartners-backend.onrender.com/stats`
+
+Фактический URL впишите сюда после первого Apply (Render может добавить суффикс к имени, если оно занято).
+
 ## Что внутри
 
 - Извлечение из 5 форматов через паттерн Стратегия: PDF текст, PDF скан с
@@ -42,6 +53,33 @@ docker compose up --build
 - OpenAPI JSON: http://localhost:8000/openapi.json
 
 Backend на старте применяет миграции и сидирует синтетический справочник.
+
+## Деплой на Render (Blueprint)
+
+Проект разворачивается одним Blueprint из `render.yaml`: managed Postgres
+(pgvector), Redis, бэкенд (Docker web, слушает `$PORT`, health `/health`),
+Celery-воркер и фронтенд (static site). Подробности и фолбэки в
+[DEPLOY_RENDER.md](DEPLOY_RENDER.md).
+
+Три шага владельца в дашборде Render:
+
+1. New → Blueprint → подключить репозиторий `k4ssymzhomart/medarchive`, ветка `main`.
+2. Ввести секреты `OPENAI_API_KEY` / `COHERE_API_KEY` / `ANTHROPIC_API_KEY` (sync: false,
+   в репозиторий не коммитятся). Все опциональны: без них работают код-матч, точное,
+   fuzzy и FTS-поиск; с `OPENAI_API_KEY` включаются эмбеддинги и LLM-арбитр.
+3. Apply и дождаться сборки (бэкенд-образ тяжёлый: Tesseract rus + LibreOffice + poppler).
+
+Свежая Render-БД пустая. Чтобы живое демо сразу показывало реальные данные без
+тяжёлого OCR на Render, восстановите дамп локальной наполненной БД:
+
+```bash
+# на машине с доступом к Render Postgres (строка подключения из дашборда)
+pg_restore --no-owner --clean --if-exists -d "$RENDER_DATABASE_URL" medpartners_demo.dump
+```
+
+Адаптации под Render уже сделаны: бэкенд слушает `$PORT`; `DATABASE_URL` вида
+`postgres://` нормализуется в `postgresql+psycopg://`; справочник и архив `docs/`
+запечены в образ (`Dockerfile.render`).
 
 ## Обработка предоставленного архива
 
