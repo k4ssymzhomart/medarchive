@@ -12,7 +12,17 @@ from app.services.search_service import search
 router = APIRouter()
 
 
-@router.get("/search", response_model=SearchResponse)
+@router.get(
+    "/search",
+    response_model=SearchResponse,
+    summary="Поиск услуг и партнёров",
+    description=(
+        "Полнотекстовый поиск по названиям услуг и партнёров (PostgreSQL FTS, "
+        "русская конфигурация, с фолбэком ILIKE). Цель времени ответа ниже 200 мс; "
+        "фактическое время запроса возвращается в поле took_ms."
+    ),
+    response_description="Результаты поиска с рангом релевантности и временем запроса",
+)
 def search_endpoint(
     q: str = Query("", description="Поисковый запрос"),
     limit: int = Query(20, ge=1, le=100),

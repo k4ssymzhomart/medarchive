@@ -20,7 +20,12 @@ from app.schemas import (
 router = APIRouter()
 
 
-@router.get("/services", response_model=ServiceListResponse)
+@router.get(
+    "/services",
+    response_model=ServiceListResponse,
+    summary="Справочник услуг",
+    description="Список активных услуг справочника с фильтрами по категории и подстроке названия.",
+)
 def list_services(
     category: str | None = Query(None),
     q: str | None = Query(None, description="Фильтр по подстроке названия"),
@@ -48,7 +53,13 @@ def list_services(
     )
 
 
-@router.get("/services/{service_id}/partners", response_model=list[ServicePartnerPrice])
+@router.get(
+    "/services/{service_id}/partners",
+    response_model=list[ServicePartnerPrice],
+    summary="Партнёры по услуге",
+    description="Кто оказывает услугу и по какой цене (только активные позиции, по возрастанию цены).",
+    responses={404: {"description": "Услуга не найдена"}},
+)
 def service_partners(
     service_id: uuid.UUID,
     db: Session = Depends(get_db),

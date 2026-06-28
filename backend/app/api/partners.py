@@ -24,7 +24,12 @@ from app.validation.versioning import pct_change
 router = APIRouter()
 
 
-@router.get("/partners", response_model=PartnerListResponse)
+@router.get(
+    "/partners",
+    response_model=PartnerListResponse,
+    summary="Список партнёров",
+    description="Партнёры (клиники) с фильтрами по городу и активности, постранично.",
+)
 def list_partners(
     city: str | None = Query(None),
     is_active: bool | None = Query(None),
@@ -48,7 +53,13 @@ def list_partners(
     )
 
 
-@router.get("/partners/{partner_id}/services", response_model=PriceItemListResponse)
+@router.get(
+    "/partners/{partner_id}/services",
+    response_model=PriceItemListResponse,
+    summary="Прайс партнёра",
+    description="Весь прайс партнёра с ценами, постранично; active_only оставляет только активные позиции.",
+    responses={404: {"description": "Партнёр не найден"}},
+)
 def partner_services(
     partner_id: uuid.UUID,
     active_only: bool = Query(True),
@@ -77,6 +88,8 @@ def partner_services(
 @router.get(
     "/partners/{partner_id}/services/{service_id}/history",
     response_model=PriceHistoryOut,
+    summary="История цен услуги у партнёра",
+    description="Динамика цены конкретной услуги у партнёра по версиям документов, с процентным изменением.",
 )
 def price_history(
     partner_id: uuid.UUID,
