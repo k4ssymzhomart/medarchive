@@ -88,7 +88,7 @@ services:
     dockerContext: .
     plan: starter
     region: frankfurt
-    startCommand: celery -A app.celery_app.celery worker --loglevel=info --concurrency=2
+    dockerCommand: celery -A app.celery_app.celery worker --loglevel=info --concurrency=2
     envVars:
       - key: DATABASE_URL
         fromDatabase:
