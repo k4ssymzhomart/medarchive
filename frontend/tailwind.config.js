@@ -64,18 +64,24 @@ export default {
         },
       },
       borderRadius: {
-        // Сохраняем острые продуктовые радиусы и добавляем v2 скругления.
+        // Острые углы по дизайн-системе (CLAUDE.md): без скруглений.
         none: "0",
-        sm: "2px",
-        DEFAULT: "2px",
-        card: "22px",
-        panel: "24px",
-        pill: "9999px",
+        sm: "0",
+        DEFAULT: "0",
+        md: "0",
+        lg: "0",
+        xl: "0",
+        "2xl": "0",
+        "3xl": "0",
+        full: "0",
+        card: "0",
+        panel: "0",
+        pill: "0",
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(10,10,11,.06), 0 12px 32px rgba(10,10,11,.08)",
-        lift: "0 2px 6px rgba(10,10,11,.08), 0 24px 60px rgba(10,10,11,.12)",
-        glow: "0 0 0 1px rgba(109,94,246,.18), 0 24px 80px rgba(109,94,246,.30)",
+        soft: "0 1px 2px rgba(10,10,11,.05), 0 8px 24px rgba(10,10,11,.06)",
+        lift: "0 2px 6px rgba(10,10,11,.06), 0 16px 40px rgba(10,10,11,.08)",
+        glow: "0 0 0 1px rgba(10,10,11,.08)",
       },
       maxWidth: {
         content: "1200px",

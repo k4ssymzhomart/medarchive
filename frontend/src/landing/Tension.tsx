@@ -15,13 +15,9 @@ export function Tension() {
   const reduce = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden bg-ink py-28 text-paper">
-      <div
-        aria-hidden="true"
-        className="glow-radial pointer-events-none absolute -right-20 top-1/2 h-[420px] w-[420px] -translate-y-1/2 opacity-50"
-      />
+    <section className="relative overflow-hidden bg-paper py-28 text-ink">
       <div className="relative mx-auto max-w-content px-6">
-        <p className="eyebrow text-accent-light">ПРОБЛЕМА</p>
+        <p className="eyebrow text-accent">ПРОБЛЕМА</p>
         <h2 className="mt-6 max-w-4xl text-h2 font-semibold leading-[1.08]">
           {LINES.map((line, i) =>
             reduce ? (

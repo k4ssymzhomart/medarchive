@@ -1,4 +1,4 @@
-// Футер (тёмный). Бренд плюс колонки ссылок. Русский, без фейковых сертификатов.
+// Футер (светлый). Бренд плюс колонки ссылок. Русский, без фейковых сертификатов.
 
 import { BrandMark } from "./BrandMark";
 
@@ -22,11 +22,11 @@ const COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
 
 export function SiteFooter() {
   return (
-    <footer id="footer" className="bg-ink text-paper">
+    <footer id="footer" className="border-t border-line bg-paper text-ink">
       <div className="mx-auto max-w-content px-6 py-20">
         <div className="grid gap-12 md:grid-cols-[1.6fr_1fr_1fr]">
           <div>
-            <BrandMark tone="paper" />
+            <BrandMark />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">
               Единая база цен клиник партнёров. Извлечение, нормализация и проверка цен.
             </p>
@@ -39,7 +39,7 @@ export function SiteFooter() {
                   <li key={l.label}>
                     <a
                       href={l.href}
-                      className="text-sm text-muted transition-colors duration-200 hover:text-paper"
+                      className="text-sm text-muted transition-colors duration-200 hover:text-ink"
                     >
                       {l.label}
                     </a>
@@ -49,9 +49,9 @@ export function SiteFooter() {
             </div>
           ))}
         </div>
-        <div className="mt-16 flex flex-col gap-4 border-t border-surface-line pt-8 text-sm text-muted md:flex-row md:items-center md:justify-between">
+        <div className="mt-16 flex flex-col gap-4 border-t border-line pt-8 text-sm text-muted md:flex-row md:items-center md:justify-between">
           <span>Все права защищены © 2026 MedServicePrice</span>
-          <a href="#top" className="transition-colors duration-200 hover:text-paper">
+          <a href="#top" className="transition-colors duration-200 hover:text-ink">
             Наверх
           </a>
         </div>

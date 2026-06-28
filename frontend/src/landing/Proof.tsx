@@ -7,9 +7,7 @@ import { Reveal } from "./Reveal";
 import { Counter } from "./Counter";
 
 const GRID_BG = {
-  backgroundImage:
-    "linear-gradient(rgba(10,10,11,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(10,10,11,.05) 1px, transparent 1px)",
-  backgroundSize: "44px 44px",
+  backgroundImage: "none",
 } as const;
 
 type Stat = { to: number; suffix?: string; label: string };

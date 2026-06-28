@@ -89,24 +89,17 @@
     text-transform: uppercase;
   }
 
-  /* Радиальное свечение акцента (hero, тёмные секции). */
+  /* Свечения и градиенты отключены: строгий белый фон, минимализм (CLAUDE.md). */
   .glow-radial {
-    background: radial-gradient(
-      closest-side,
-      rgba(154, 140, 255, 0.55),
-      rgba(154, 140, 255, 0.18) 45%,
-      rgba(154, 140, 255, 0) 72%
-    );
+    background: none;
   }
 
-  /* Диагональная акцентная панель для CTA. */
   .gradient-cta {
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+    background: var(--paper);
   }
 
-  /* Мягкая фиолетовая дымка для градиентной секции. */
   .gradient-haze {
-    background: linear-gradient(180deg, var(--paper) 0%, #eceaff 55%, var(--paper) 100%);
+    background: var(--paper);
   }
 
   .text-balance {

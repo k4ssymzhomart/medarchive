@@ -59,21 +59,17 @@ export function CTA() {
     <section id="cta" className="bg-paper px-6 py-24">
       <div className="mx-auto max-w-content">
         <Reveal intent="statement">
-          <div className="gradient-cta relative overflow-hidden rounded-panel px-8 py-20 text-center shadow-glow">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-[-30%] h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-accent-light/30 blur-3xl"
-            />
+          <div className="relative overflow-hidden border border-line bg-paper px-8 py-20 text-center">
             <div className="relative mx-auto max-w-2xl">
-              <h2 className="text-h2 font-semibold text-paper">Попробуйте MedServicePrice</h2>
-              <p className="mt-3 text-lg text-paper/85">Запишитесь на демо сегодня</p>
+              <h2 className="text-h2 font-semibold text-ink">Попробуйте MedServicePrice</h2>
+              <p className="mt-3 text-lg text-muted">Запишитесь на демо сегодня</p>
               <div className="mt-8 flex justify-center">
-                <EmailCapture variant="onAccent" />
+                <EmailCapture />
               </div>
               <div className="mt-8">
                 <MagneticLink
                   href="/app"
-                  className="inline-flex items-center gap-2 rounded-pill border border-paper/40 px-6 py-3 text-sm font-medium text-paper transition-colors duration-200 hover:bg-paper/10"
+                  className="inline-flex items-center gap-2 bg-ink px-6 py-3 text-sm font-medium text-paper transition-transform duration-200 ease-out2 hover:scale-[1.02]"
                 >
                   Открыть приложение
                   <ArrowUpRight className="h-4 w-4" />
