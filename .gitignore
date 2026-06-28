@@ -32,3 +32,11 @@ Thumbs.db
 .vscode/
 *.swp
 .claude/launch.json
+
+# Внутренние рабочие файлы оркестрации (не для сдачи)
+PHASE_*.md
+SPEC_*phase*.md
+AGENT_ROLE_*.md
+ORCHESTRATION_*.md
+PROJECT_HANDOFF.md
+FINALIZATION_*.md

@@ -1,11 +1,25 @@
-# MedPartners на Render (Blueprint).
-# Деплой: Render Dashboard -> New -> Blueprint -> подключить этот репозиторий.
-# Render прочитает этот файл и создаст: Postgres (pgvector), бэкенд (Docker web),
-# фронтенд (static site). Секретные ключи (sync: false) задаются в дашборде.
+# MedPartners на Render (Blueprint, FREE-вариант).
+# Все сервисы на бесплатном тарифе: Postgres (free), бэкенд (web, free),
+# фронтенд (static, free). Без воркера и без Redis: для демо на восстановленном
+# дампе БД они не нужны.
 #
-# ВАЖНО про URL: Render даёт сервисам адреса вида https://<имя>.onrender.com.
-# Если имена ниже свободны — URL предсказуемы. Если Render добавит суффикс,
-# обнови VITE_API_URL (фронт) и API_CORS_ORIGINS (бэк) на фактические адреса.
+# Деплой: Render Dashboard -> New -> Blueprint -> подключить репозиторий ->
+# ветка main -> ввести ключи (sync:false) -> Apply.
+#
+# ВАЖНО про URL: Render даёт адреса вида https://<имя>.onrender.com. Если имена
+# заняты и Render добавит суффикс, обнови VITE_API_URL (фронт) и
+# API_CORS_ORIGINS (бэк) на фактические адреса и пересобери фронт.
+#
+# Замечания по free-тарифу:
+#  - Free web-сервисы засыпают после простоя; первый запрос будит их (10-30 с).
+#    Перед демо открой бэкенд и фронт заранее, чтобы прогреть.
+#  - Free Postgres: 1 ГБ, срок жизни 30 дней. Для демо достаточно.
+#  - preDeployCommand на free недоступен, поэтому миграции и сид справочника
+#    вынесены в dockerCommand. Команды идемпотентны.
+#  - Загрузка новых прайсов через UI (/upload) на free не работает: нет
+#    воркера и Redis. Демо-данные заливаются восстановлением дампа БД
+#    (см. DEPLOY_RENDER.md). Поиск, нормализация, верификация, история цен и
+#    дашборд работают полностью.
 
 databases:
   - name: medpartners-db
@@ -17,44 +31,26 @@ databases:
     # managed Postgres на Render это поддерживает.
 
 services:
-  # --- Redis (Key Value): брокер Celery для асинхронной обработки документов ---
-  - type: redis
-    name: medpartners-redis
-    plan: free
-    region: frankfurt
-    maxmemoryPolicy: noeviction
-    ipAllowList: []          # пусто = доступ только из приватной сети Render
-
-  # --- Бэкенд: FastAPI + конвейер нормализации (Docker) ---
+  # --- Бэкенд: FastAPI + конвейер нормализации (Docker, free) ---
   - type: web
     name: medpartners-backend
     runtime: docker
     dockerfilePath: ./Dockerfile.render
     dockerContext: .
-    plan: starter            # free тоже работает; starter стабильнее для OCR/LibreOffice
-    region: frankfurt        # ближе к KZ/демо; можно oregon
+    plan: free               # 512 МБ RAM; для отдачи API на восстановленном дампе достаточно
+    region: frankfurt        # ближе к KZ; при желании oregon
     healthCheckPath: /health
-    # Миграции + сид справочника один раз на деплой (идемпотентно).
-    preDeployCommand: "alembic upgrade head && python -m app.cli seed-reference 'Справочник услуг.xlsx'"
+    # На free нет preDeployCommand, поэтому миграции и сид справочника кладём в
+    # команду запуска. Идемпотентно: alembic не двигает уже накатанную схему,
+    # seed-reference делает upsert. $PORT задаёт Render.
+    dockerCommand: >-
+      sh -c "alembic upgrade head &&
+      python -m app.cli seed-reference 'Справочник услуг.xlsx' &&
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: medpartners-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: medpartners-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: medpartners-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: medpartners-redis
           property: connectionString
       - key: API_CORS_ORIGINS
         value: https://medpartners-frontend.onrender.com
@@ -77,54 +73,7 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
-  # --- Воркер: Celery для асинхронной обработки загруженных документов ---
-  # Опционально для демо: рекомендованный путь демо это восстановление дампа БД
-  # (DEPLOY_RENDER.md), воркер нужен только для загрузки новых файлов через UI.
-  # Render background worker требует платный план (free на воркерах нет).
-  - type: worker
-    name: medpartners-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile.render
-    dockerContext: .
-    plan: starter
-    region: frankfurt
-    dockerCommand: celery -A app.celery_app.celery worker --loglevel=info --concurrency=2
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: medpartners-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: medpartners-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: medpartners-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: medpartners-redis
-          property: connectionString
-      - key: STORAGE_BACKEND
-        value: local
-      - key: STORAGE_LOCAL_DIR
-        value: /data/storage
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: LLM_ARBITER_MODEL
-        value: gpt-4o-mini
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: COHERE_API_KEY
-        sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-
-  # --- Фронтенд: лендинг (/) + продукт (/app) как статический сайт ---
+  # --- Фронтенд: лендинг (/) + продукт (/app) как статический сайт (free) ---
   - type: web
     name: medpartners-frontend
     runtime: static
