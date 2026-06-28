@@ -29,7 +29,7 @@ from app.pipeline.registry import build_default_registry
 from app.pipeline.router import classify_pdf, detect_format, parse_effective_date
 from app.services.partner_service import resolve_partner
 from app.storage import get_storage
-from app.validation.checks import convert_to_kzt, validate_extracted
+from app.validation.checks import convert_to_kzt, document_status, validate_extracted
 from app.validation.versioning import apply_versioning
 
 
@@ -158,9 +158,7 @@ def process_document(db: Session, doc_id: uuid.UUID) -> PriceDocument:
                 review_count += 1
 
         doc.item_count = len(saved_items)
-        doc.parse_status = (
-            ParseStatus.needs_review if review_count else ParseStatus.done
-        )
+        doc.parse_status = document_status(len(saved_items), review_count)
         if skipped:
             log.append(f"Пропущено пустых/битых строк: {skipped}")
         log.append(

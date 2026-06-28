@@ -17,11 +17,18 @@ from app.models import PriceItem
 
 
 def _price_of(item: PriceItem) -> Decimal | None:
-    return item.price_resident_kzt or item.price_nonresident_kzt or item.price_original
+    """Цена для сравнения версий: первое заполненное поле, а не первое
+    истинное (Decimal('0') ложен, поэтому ``or`` пропустил бы валидный ноль)."""
+    for price in (item.price_resident_kzt, item.price_nonresident_kzt, item.price_original):
+        if price is not None:
+            return price
+    return None
 
 
 def pct_change(old: Decimal | None, new: Decimal | None) -> float | None:
     if old is None or new is None or old == 0:
+        return None
+    if not (old.is_finite() and new.is_finite()):
         return None
     return float(abs(new - old) / old)
 
@@ -56,7 +63,8 @@ def apply_versioning(db: Session, item: PriceItem) -> dict:
     new_price = _price_of(item)
     old_price = _price_of(prev)
 
-    # Определяем порядок по дате: архивируем более старую.
+    # Определяем порядок по дате: архивируем более старую, активной остаётся
+    # самая свежая версия — её и видит оператор, на неё вешаем флаги аномалии.
     item_is_newer = True
     if item.effective_date and prev.effective_date:
         item_is_newer = item.effective_date >= prev.effective_date
@@ -65,19 +73,27 @@ def apply_versioning(db: Session, item: PriceItem) -> dict:
         prev.is_active = False
         item.supersedes_item_id = prev.item_id
         info["superseded"] = True
+        active = item
         change = pct_change(old_price, new_price)
     else:
+        # Входящая позиция старше активной: архивируем входящую, свежей
+        # остаётся уже сохранённая prev. База для % — более старая (входящая).
         item.is_active = False
         item.supersedes_item_id = prev.item_id
+        active = prev
         change = pct_change(new_price, old_price)
 
     info["pct_change"] = change
     if change is not None and change > settings.anomaly_pct_threshold:
-        item.is_anomaly = True
-        item.needs_review = True
+        active.is_anomaly = True
+        active.needs_review = True
         info["anomaly"] = True
         note = f"Аномалия цены: изменение {change * 100:.0f}% между версиями"
-        item.verification_note = (item.verification_note + "; " if item.verification_note else "") + note
+        # Идемпотентно: prev остаётся активной, и повторный приход более старой
+        # позиции не должен дублировать ту же заметку на операторской строке.
+        existing = active.verification_note or ""
+        if note not in existing:
+            active.verification_note = (existing + "; " if existing else "") + note
 
     db.flush()
     return info

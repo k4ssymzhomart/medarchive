@@ -69,6 +69,11 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Операторский токен на админские эндпоинты (загрузка, сопоставление,
+      # очереди). Пусто = защита выключена. Чтобы закрыть админку, задай тот же
+      # токен здесь и во VITE_OPERATOR_TOKEN фронтенда.
+      - key: OPERATOR_TOKEN
+        sync: false
 
   # --- Фронтенд: лендинг (/) + продукт (/app) как статический сайт (free) ---
   - type: web
@@ -81,6 +86,11 @@ services:
       # База API на этапе сборки. Должна указывать на бэкенд выше.
       - key: VITE_API_URL
         value: https://medpartners-backend.onrender.com
+      # Операторский токен (тот же, что OPERATOR_TOKEN бэкенда). Пусто = админка
+      # открыта. Вшивается в сборку фронта, поэтому это токен демо-оператора, а
+      # не секрет уровня ключей AI.
+      - key: VITE_OPERATOR_TOKEN
+        sync: false
     routes:
       # SPA: любые маршруты отдаём index.html (React Router).
       - type: rewrite

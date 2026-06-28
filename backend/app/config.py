@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     ocr_languages: str = "rus+eng"
     ocr_dpi: int = 300
 
+    # --- Аутентификация оператора (раздел 4.2) ---
+    # Единый токен на админские эндпоинты (загрузка, сопоставление, очереди).
+    # Пусто -> защита выключена (локальная разработка); в проде задаётся секретом.
+    operator_token: str = ""
+
     # --- Прочее ---
     anomaly_pct_threshold: float = 0.50
     api_cors_origins: str = "http://localhost:5173,http://localhost:3000"
